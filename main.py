@@ -114,11 +114,6 @@ class MainWindow(QMainWindow):
         # Initialize the FaceIndexer
         face_indexer = FaceIndexer()
 
-        # Use the recognize_face method
-        new_embedding = np.random.rand(512)  # Replace with actual embedding
-        recognized_info = face_indexer.recognize_face(new_embedding, threshold=0.5)
-
-
 
     def navigate_to(self, page):
         self.central_widget = MainPage(self)

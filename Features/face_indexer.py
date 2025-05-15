@@ -1,7 +1,9 @@
 import faiss
 import numpy as np
+from numpy.linalg import norm
 import os
 from db.database import get_connection
+import glob
 
 class FaceIndexer:
     def __init__(self):
@@ -12,6 +14,10 @@ class FaceIndexer:
 
         # Create FAISS index
         self.index = self.build_faiss_index(self.embeddings)
+
+    import glob
+    import numpy as np
+    from db.database import get_connection
 
     def load_faces(self):
         conn = get_connection()
@@ -25,60 +31,100 @@ class FaceIndexer:
             cursor.execute(query)
             for row in cursor.fetchall():
                 id_, name, contact, npy_path = row
-                try:
-                    emb = np.load(npy_path)
-                    if emb.ndim == 1 and emb.shape[0] == 512:
-                        # Store both embedding and info together
-                        all_data.append({
-                            "embedding": emb,
-                            "info": {
-                                "id": id_,
-                                "name": name,
-                                "contact": contact
-                            }
-                        })
-                except Exception as e:
-                    print(f"[{table}] Failed to load {npy_path}: {e}")
 
-        self.data = all_data  # List of dicts with both embedding and info
+                # Support wildcard paths using glob
+                npy_files = glob.glob(npy_path) if '*' in npy_path else [npy_path]
+
+                for path in npy_files:
+                    try:
+                        if path.endswith(".npy"):
+                            emb = np.load(path)
+                            if emb.ndim == 1 and emb.shape[0] == 512:
+                                all_data.append({
+                                    "embedding": emb,
+                                    "info": {
+                                        "id": id_,
+                                        "name": name,
+                                        "contact": contact
+                                    }
+                                })
+
+                        elif path.endswith(".npz"):
+                            npz_data = np.load(path)
+                            # Make sure 'embeddings' key exists
+                            if 'embeddings' in npz_data:
+                                emb_array = npz_data['embeddings']
+                                if emb_array.ndim == 2 and emb_array.shape[1] == 512:
+                                    for emb in emb_array:
+                                        all_data.append({
+                                            "embedding": emb,
+                                            "info": {
+                                                "id": id_,
+                                                "name": name,
+                                                "contact": contact
+                                            }
+                                        })
+                                else:
+                                    print(f"⚠️ Invalid shape in {path}: expected (n, 512), got {emb_array.shape}")
+                            else:
+                                print(f"⚠️ 'embeddings' key not found in {path}")
+                    except Exception as e:
+                        print(f"[{table}] Failed to load {path}: {e}")
+
         conn.close()
-
         return all_data
 
-
     def build_faiss_index(self, embeddings):
-        """
-        Build a FAISS index using L2 (Euclidean) distance
-        """
-        # Ensure the embeddings are in float32 format
-        embeddings = np.array(embeddings, dtype=np.float32)
+        if embeddings.size == 0:
+            print("❌ No embeddings available to build the FAISS index.")
+            return None
 
-        # Create a FAISS index using L2 distance (Euclidean distance)
-        index = faiss.IndexFlatL2(embeddings.shape[1])  # Embedding size = embeddings.shape[1]
+        try:
+            embeddings = np.array(embeddings, dtype=np.float32)
+            if embeddings.ndim != 2 or embeddings.shape[1] != 512:
+                raise ValueError("Embeddings must be a 2D array with shape (n_samples, 512)")
 
-        # Add the embeddings to the index
-        index.add(embeddings)
-        return index
+            # ✅ Normalize before indexing (cosine similarity in L2 space)
+            embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
 
-    def recognize_face(self, new_embedding, threshold=0.6):
-        """
-        Recognize the face by searching for the nearest neighbor in the FAISS index.
-        The threshold ensures that the match must be sufficiently close.
-        """
-        # Convert the new embedding to float32 (it must match the format)
+            index = faiss.IndexFlatL2(embeddings.shape[1])
+            index.add(embeddings)
+            print("FAISS index loaded with:", index.ntotal, "embeddings")
+            return index
+
+        except ValueError as e:
+            print(f"❌ Error in building FAISS index: {e}")
+            return None  # Or you could return an empty index if needed
+
+        except Exception as e:
+            print(f"❌ Unexpected error in building FAISS index: {e}")
+            return None
+
+    def recognize_face(self, new_embedding, threshold=1.2):
+        new_embedding = new_embedding / norm(new_embedding)
         new_embedding = np.array([new_embedding], dtype=np.float32)
 
-        # Search for the nearest neighbor (closest face)
-        distances, indices = self.index.search(new_embedding, k=1)  # k=1 means we want the closest match
+        # Check if the index was built successfully
+        if self.index is None:
+            print("❌ FAISS index is not available. Cannot recognize face.")
+            return None
 
-        # If a valid match is found and the distance is below the threshold, fetch the corresponding information
+        print("→ Input embedding shape:", new_embedding.shape)
+        print("→ FAISS index size:", self.index.ntotal)
+
+        distances, indices = self.index.search(new_embedding, k=1)
+
+        print("→ Nearest index:", indices[0][0])
+        print("→ Distance to nearest:", distances[0][0])
+
         if indices[0][0] != -1 and distances[0][0] < threshold:
-            recognized_info = self.infos[indices[0][0]]  # Use the index to get the info
-            print(f"Face recognized: {recognized_info['name']} (ID: {recognized_info['id']})")
+            recognized_info = self.infos[indices[0][0]]
+            print(f"✅ Face recognized: {recognized_info['name']} (ID: {recognized_info['id']})")
             return recognized_info
         else:
-            print("No match found or the match is not strict enough")
+            print("❌ No match found or the match is not strict enough")
             return None
+
 
 # Example of loading faces and recognizing a new face
 face_indexer = FaceIndexer()
