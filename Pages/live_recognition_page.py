@@ -1,12 +1,14 @@
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QDialog, QPushButton, QDialogButtonBox, QLineEdit, QScrollArea
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread
 from PySide6.QtGui import QFont, QImage, QPixmap
 from pygrabber.dshow_graph import FilterGraph
 import cv2
 import numpy as np
 import insightface
 import uuid
+import time
 from Features.face_indexer import FaceIndexer
+from Features.face_services import FaceDetectionService
 
 
 class LiveRecognitionPage(QWidget):
@@ -150,7 +152,29 @@ class AddCameraDialog(QDialog):
                 self.rtsp_input.text()
             )
 
+class FaceDetectionWorker(QObject):
+    detection_complete = Signal(np.ndarray, list)  # Emits original frame and detected faces
+
+    def __init__(self, face_service, scale=0.5):
+        super().__init__()
+        self.face_service = face_service
+        self.scale = scale
+        self.running = False
+
+    def process_frame(self, frame):
+        if not self.running:
+            self.running = True
+            try:
+                # Process in worker thread
+                small_frame = cv2.resize(frame, (0, 0), fx=self.scale, fy=self.scale)
+                faces = self.face_service.detect_faces(small_frame)
+                self.detection_complete.emit(frame, faces)
+            finally:
+                self.running = False
+
 class CameraFeedWidget(QWidget):
+    finished = Signal()
+
     def __init__(self, source, source_type='wired', label='Camera', parent=None):
         super().__init__(parent)
         self.label = label
@@ -158,20 +182,28 @@ class CameraFeedWidget(QWidget):
         self.source_type = source_type
         self.cap = None
         self.timer = QTimer(self)
-        self.timer.timeout.connect(self.update_frame)
-        self.face_analyzer = insightface.app.FaceAnalysis(name='buffalo_s', providers=['CPUExecutionProvider'])
-        self.face_analyzer.prepare(ctx_id=-1)
-        self.scale = 0.5
-        self.init_ui()
-        self.frame_counter = 0
+        self.last_display_time = 0
+        self.current_frame = None  # Add this to store the current frame
+        self.last_processed_frame = None  # Add this to track last processed frame
+
+        # Face detection setup
+        self.face_service = FaceDetectionService()
+        self.face_worker = FaceDetectionWorker(self.face_service)
+        self.face_thread = QThread()
+        self.face_worker.moveToThread(self.face_thread)
+        self.face_thread.start()
+
+        # Tracking variables
         self.tracked_faces = {}
+        self.frame_counter = 0
         self.embedding_threshold = 0.6
         self.face_ttl = 30
-        self.faces = []
-        self.face_recognize = FaceIndexer()
-        self.detecting = False
-        self.detected_faces = []
         self.iou_threshold = 0.3
+        self.face_recognize = FaceIndexer()
+
+        self.init_ui()
+        self.init_connections()
+        self.start_camera()
 
     def init_ui(self):
         layout = QVBoxLayout()
@@ -181,22 +213,23 @@ class CameraFeedWidget(QWidget):
         self.title.setAlignment(Qt.AlignCenter)
         self.image_label = QLabel()
         self.image_label.setFixedSize(640, 480)
-        self.image_label.setStyleSheet("""background-color: gray""")
+        self.image_label.setStyleSheet("background-color: gray")
         layout.addWidget(self.title)
         layout.addWidget(self.image_label)
 
-        self.start_camera()
+    def init_connections(self):
+        self.timer.timeout.connect(self.update_frame)
+        self.face_worker.detection_complete.connect(self.handle_detection_results)
 
     def iou(self, box1, box2):
-        x1, y1, x2, y2 = box1
-        xx1, yy1, xx2, yy2 = box2
-        xi1 = max(x1, xx1)
-        yi1 = max(y1, yy1)
-        xi2 = min(x2, xx2)
-        yi2 = min(y2, yy2)
+        """Calculate Intersection over Union for two bounding boxes"""
+        xi1 = max(box1[0], box2[0])
+        yi1 = max(box1[1], box2[1])
+        xi2 = min(box1[2], box2[2])
+        yi2 = min(box1[3], box2[3])
         inter_area = max(0, xi2 - xi1) * max(0, yi2 - yi1)
-        box1_area = (x2 - x1) * (y2 - y1)
-        box2_area = (xx2 - xx1) * (yy2 - yy1)
+        box1_area = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        box2_area = (box2[2] - box2[0]) * (box2[3] - box2[1])
         union_area = box1_area + box2_area - inter_area
         return inter_area / union_area if union_area > 0 else 0
 
@@ -205,12 +238,17 @@ class CameraFeedWidget(QWidget):
             self.cap = cv2.VideoCapture(self.source)
         else:
             self.cap = cv2.VideoCapture(self.source, cv2.CAP_FFMPEG)
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            self.cap.set(cv2.CAP_PROP_FPS, 25)  # Limit FPS for RTSP
 
         if self.cap.isOpened():
-            self.timer.start(30)
+            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+            self.timer.start(30)  # ~33ms per frame (~30fps)
 
     def update_frame(self):
-        if self.cap is None or not self.cap.isOpened():
+        """Capture and process a new frame from the camera"""
+        if not self.cap or not self.cap.isOpened():
             return
 
         ret, frame = self.cap.read()
@@ -218,51 +256,97 @@ class CameraFeedWidget(QWidget):
             return
 
         self.frame_counter += 1
+        self.current_frame = frame.copy()  # Store the current frame
+
+        # Throttle display updates
+        current_time = time.time()
+        if current_time - self.last_display_time < 1 / 30:
+            return
+
+        # Convert to RGB for display
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        if self.frame_counter % 2 == 0:
-            small_frame = cv2.resize(rgb_frame, (0, 0), fx=self.scale, fy=self.scale)
-            self.faces = self.face_analyzer.get(small_frame)
+        # Draw existing faces on the current frame
+        self.draw_face_annotations(rgb_frame)
 
-        for face in self.faces:
-            box = (face.bbox / self.scale).astype(int)
+        # Display the frame
+        self.display_frame(rgb_frame)
+        self.last_display_time = current_time
+
+        # Start face detection every 2nd frame if we're not already processing
+        if (self.frame_counter % 2 == 0 and
+                not self.face_worker.running and
+                not np.array_equal(frame, self.last_processed_frame)):
+            self.last_processed_frame = frame.copy()
+            QTimer.singleShot(0, lambda: self.face_worker.process_frame(rgb_frame.copy()))
+
+    def handle_detection_results(self, frame, faces):
+        """Process face detection results from worker thread"""
+        # Update tracking with new detections
+        for face in faces:
+            box = (face.bbox / self.face_worker.scale).astype(int)
             x1, y1, x2, y2 = box
 
-            matched_id = None
+            # Find best matching existing face
+            best_match_id = None
+            best_iou = 0
             for face_id, data in self.tracked_faces.items():
-                if self.iou(box, data["bbox"]) > self.iou_threshold:
-                    matched_id = face_id
-                    self.tracked_faces[face_id]["last_seen"] = self.frame_counter
-                    break
+                current_iou = self.iou(box, data["bbox"])
+                if current_iou > self.iou_threshold and current_iou > best_iou:
+                    best_iou = current_iou
+                    best_match_id = face_id
 
-            if matched_id is None:
+            if best_match_id is not None:
+                # Update existing face
+                self.tracked_faces[best_match_id].update({
+                    "bbox": box,
+                    "last_seen": self.frame_counter,
+                    "kps": getattr(face, 'kps', None)
+                })
+                if hasattr(face, 'normed_embedding'):
+                    self.tracked_faces[best_match_id]["embedding"] = face.normed_embedding
+            elif hasattr(face, 'normed_embedding'):
+                # Add new face
                 new_id = str(uuid.uuid4())
-                cropped_face = frame[y1:y2, x1:x2]
-                embedding = face.normed_embedding
-                if embedding is not None:
-                    self.tracked_faces[new_id] = {
-                        "bbox": box,
-                        "embedding": embedding,
-                        "last_seen": self.frame_counter
-                    }
-                    self.face_recognize.recognize_face(embedding)
-            else:
-                embedding = self.tracked_faces[matched_id]["embedding"]
+                self.tracked_faces[new_id] = {
+                    "bbox": box,
+                    "embedding": face.normed_embedding,
+                    "last_seen": self.frame_counter,
+                    "kps": getattr(face, 'kps', None)
+                }
+                self.face_recognize.recognize_face(face.normed_embedding)
 
-            cv2.rectangle(rgb_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-            for landmark in (face.kps / self.scale):
-                cv2.circle(rgb_frame, tuple(landmark.astype(int)), 2, (0, 0, 255), -1)
-
-        expired = [
-            face_id for face_id, data in self.tracked_faces.items()
-            if self.frame_counter - data["last_seen"] > self.face_ttl
-        ]
+        # Remove expired faces
+        current_frame = self.frame_counter
+        expired = [fid for fid, data in self.tracked_faces.items()
+                  if current_frame - data["last_seen"] > self.face_ttl]
         for face_id in expired:
             del self.tracked_faces[face_id]
 
-        h, w, ch = rgb_frame.shape
+    def draw_face_annotations(self, frame):
+        """Draw face bounding boxes and landmarks on the frame"""
+        for face_id, data in self.tracked_faces.items():
+            x1, y1, x2, y2 = data["bbox"]
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+
+            # Draw face ID
+            cv2.putText(frame, f"ID: {face_id[:8]}", (x1, y1 - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+
+            # Draw landmarks if available
+            if "kps" in data and data["kps"] is not None:
+                for landmark in (data["kps"] / self.face_worker.scale):
+                    cv2.circle(frame, tuple(landmark.astype(int)), 2, (0, 0, 255), -1)
+
+        # Update display
+        self.display_frame(frame)
+
+    def display_frame(self, frame):
+        """Display the frame in the QLabel"""
+        h, w, ch = frame.shape
         bytes_per_line = ch * w
-        qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+        qt_image = QImage(frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
         self.image_label.setPixmap(QPixmap.fromImage(qt_image).scaled(
             self.image_label.size(),
             Qt.KeepAspectRatio,
@@ -270,6 +354,9 @@ class CameraFeedWidget(QWidget):
         ))
 
     def stop_camera(self):
+        """Clean up camera resources"""
         if self.cap:
             self.cap.release()
         self.timer.stop()
+        self.face_thread.quit()
+        self.face_thread.wait()
