@@ -20,42 +20,34 @@ class FaceIndexer:
         conn = get_connection()
         cursor = conn.cursor()
 
-        tables = [("student_info", "student"), ("staff_info", "staff")]
         all_data = []
 
-        for table, role in tables:
-            query = f"SELECT id, name, contact, npy_path FROM {table}"
-            cursor.execute(query)
-            for row in cursor.fetchall():
-                id_, name, contact, npz_path = row
+        # Unified people_info table
+        cursor.execute("SELECT id, name, contact, role, section_or_job, npy_path FROM person_info")
+        for row in cursor.fetchall():
+            id_, name, contact, role, section_or_job, npz_path = row
+            npz_files = glob.glob(npz_path) if '*' in npz_path else [npz_path]
 
-                # Support wildcard paths using glob
-                npz_files = glob.glob(npz_path) if '*' in npz_path else [npz_path]
-
-                for path in npz_files:
-                    try:
-                        if path.endswith(".npz"):
-                            npz_data = np.load(path)
-                            # Make sure 'embeddings' key exists
-                            if 'embeddings' in npz_data:
-                                emb_array = npz_data['embeddings']
-                                if emb_array.ndim == 2 and emb_array.shape[1] == 512:
-                                    for emb in emb_array:
-                                        all_data.append({
-                                            "embedding": emb,
-                                            "info": {
-                                                "id": id_,
-                                                "name": name,
-                                                "contact": contact,
-                                                "role": role
-                                            }
-                                        })
-                                else:
-                                    print(f"⚠️ Invalid shape in {path}: expected (n, 512), got {emb_array.shape}")
-                            else:
-                                print(f"⚠️ 'embeddings' key not found in {path}")
-                    except Exception as e:
-                        print(f"[{table}] Failed to load {path}: {e}")
+            for path in npz_files:
+                try:
+                    if path.endswith(".npz"):
+                        npz_data = np.load(path)
+                        if 'embeddings' in npz_data:
+                            emb_array = npz_data['embeddings']
+                            if emb_array.ndim == 2 and emb_array.shape[1] == 512:
+                                for emb in emb_array:
+                                    all_data.append({
+                                        "embedding": emb,
+                                        "info": {
+                                            "id": id_,
+                                            "name": name,
+                                            "contact": contact,
+                                            "role": role,
+                                            "section": section_or_job
+                                        }
+                                    })
+                except Exception as e:
+                    print(f"[people_info] Failed to load {path}: {e}")
 
         conn.close()
         return all_data
@@ -86,7 +78,7 @@ class FaceIndexer:
             print(f"❌ Unexpected error in building FAISS index: {e}")
             return None
 
-    def recognize_face(self, new_embedding, threshold=1.2):
+    def recognize_face(self, new_embedding, threshold=1.2, camera_purpose=None):
         new_embedding = new_embedding / norm(new_embedding)
         new_embedding = np.array([new_embedding], dtype=np.float32)
 
@@ -104,12 +96,13 @@ class FaceIndexer:
 
         if indices[0][0] != -1 and distances[0][0] < threshold:
             recognized_info = self.infos[indices[0][0]]
-            print(f"✅ Face recognized: {recognized_info['name']} (ID: {recognized_info['id']})")
+            print(f"✅ Face recognized: {recognized_info['name']} (ID: {recognized_info['id']}) has {'Entered' if camera_purpose == 'Entry' else 'Exited'}")
 
             # Get current date as string (YYYY-MM-DD)
             current_date = datetime.now().strftime('%Y-%m-%d')
             name = recognized_info['name']
             role = recognized_info.get('role', 'unknown')
+            section = recognized_info.get('section', 'unknown')
 
             # Check entry log and insert if not exist
             conn = get_connection()
@@ -117,18 +110,18 @@ class FaceIndexer:
 
             # Check if entry exists for this name and date
             cursor.execute("""
-                SELECT COUNT(*) FROM entry_logs
-                WHERE name = %s AND date = %s
-            """, (name, current_date))
+                SELECT COUNT(*) FROM gate_logs
+                WHERE name = %s AND timestamp = %s AND purpose = %s
+            """, (name, current_date, camera_purpose))
 
             (count,) = cursor.fetchone()
 
             if count == 0:
                 # Insert new log
                 cursor.execute("""
-                    INSERT INTO entry_logs (name, date, role)
-                    VALUES (%s, %s, %s)
-                """, (name, current_date, role))
+                    INSERT INTO gate_logs (name, timestamp, role, purpose, section)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (name, current_date, role, camera_purpose, section))
                 conn.commit()
                 print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
             else:

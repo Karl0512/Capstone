@@ -58,7 +58,12 @@ class LiveRecognitionPage(QWidget):
                 cam_source = rtsp
 
             label = f"{purpose} - {location}"
-            camera_widget = CameraFeedWidget(source=cam_source, source_type=source_type, label=label)
+            camera_widget = CameraFeedWidget(
+                source=cam_source,
+                source_type=source_type,
+                label=label,
+                purpose=purpose  # <- Pass purpose
+            )
             self.cameras_layout.addWidget(camera_widget)
             self.camera_widgets.append(camera_widget)
 
@@ -175,11 +180,12 @@ class FaceDetectionWorker(QObject):
 class CameraFeedWidget(QWidget):
     finished = Signal()
 
-    def __init__(self, source, source_type='wired', label='Camera', parent=None):
+    def __init__(self, source, source_type='wired', label='Camera', purpose='Entry', parent=None):
         super().__init__(parent)
         self.label = label
         self.source = source
         self.source_type = source_type
+        self.purpose = purpose
         self.cap = None
         self.timer = QTimer(self)
         self.last_display_time = 0
@@ -314,7 +320,7 @@ class CameraFeedWidget(QWidget):
                     "last_seen": self.frame_counter,
                     "kps": getattr(face, 'kps', None)
                 }
-                self.face_recognize.recognize_face(face.normed_embedding)
+                self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose)
 
         # Remove expired faces
         current_frame = self.frame_counter

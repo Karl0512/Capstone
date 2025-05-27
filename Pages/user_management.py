@@ -6,7 +6,8 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QStandardItemModel, QStandardItem, QGuiApplication, QImage, QPixmap
 import cv2
 import sys
-from insightface.app import FaceAnalysis
+from Features.face_services import FaceDetectionService
+from Features.camera_manager import CameraManager
 import numpy as np
 from numpy.linalg import norm
 import threading
@@ -20,62 +21,59 @@ class UserManagementPage(QWidget):
     def __init__(self):
         super().__init__()
 
-        # Create the main layout for the page
         layout = QVBoxLayout()
         layout.setSpacing(0)
-        layout.setContentsMargins(0,0,0,0)
+        layout.setContentsMargins(0, 0, 0, 0)
 
-        # make a widget for section
+        # --- First Section: Title and Add Button ---
         first_section = QWidget(self)
-        second_section = QWidget(self)
-
-
-        # control the size of widget
         first_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        second_section.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
-
-        # create a layout for first section
         title_layout = QHBoxLayout(first_section)
 
-        # add widgets to first section
         lbl_title = QLabel("User Management", first_section)
         btn_add = QPushButton("Add a Person", first_section)
         btn_add.clicked.connect(self.open_add_person_window)
 
-        # add widgets to the layout
         title_layout.addWidget(lbl_title)
+        title_layout.addStretch()
         title_layout.addWidget(btn_add)
 
-        # create a layout for 2nd section
-        second_section_layout = QVBoxLayout(second_section)
+        # --- Second Section: Filters ---
+        second_section = QWidget(self)
+        second_section.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        filter_layout = QHBoxLayout(second_section)
 
-        # add widgets to second section
-        lbl_role = QLabel("Role:")
-        self.cmb_role = QComboBox(second_section)
-        self.cmb_role.addItems(["Students", "Staff"])
-        self.cmb_role.currentIndexChanged.connect(lambda: self.load_data_from_db(table))
-        self.cmb_role.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.filter_name = QLineEdit()
+        self.filter_name.setPlaceholderText("Filter by name")
 
-        # add widgets to the layout
-        second_section_layout.addWidget(lbl_role)
-        second_section_layout.addWidget(self.cmb_role)
+        self.filter_section = QLineEdit()
+        self.filter_section.setPlaceholderText("Filter by section/job")
 
-        # table
+        self.filter_role = QComboBox()
+        self.filter_role.addItem("All")
+        self.filter_role.addItems(["Students", "Staff"])
 
-        table = QTableWidget()
-        table.setColumnCount(3)
-        table.setHorizontalHeaderLabels(["Name", "Section", "Contact No"])
-        table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        btn_filter = QPushButton("Filter")
+        btn_filter.clicked.connect(self.filter_data)
 
-        self.load_data_from_db(table)
+        filter_layout.addWidget(self.filter_name)
+        filter_layout.addWidget(self.filter_section)
+        filter_layout.addWidget(self.filter_role)
+        filter_layout.addWidget(btn_filter)
 
+        # --- Table ---
+        self.table = QTableWidget()
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Name", "Role", "Section / Job", "Contact No"])
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
+        self.load_data_from_db(self.table)  # Load initial data with no filter
+
+        # --- Add widgets to layout ---
         layout.addWidget(first_section)
         layout.addWidget(second_section)
-        layout.addWidget(table)
+        layout.addWidget(self.table)
 
-
-        # Set the layout for the current page widget
         self.setLayout(layout)
         self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
 
@@ -88,11 +86,7 @@ class UserManagementPage(QWidget):
         conn = get_connection()  # Replace with your DB name
         cursor = conn.cursor()
 
-        role = "student_info" if self.cmb_role.currentText() == "Students" else "staff_info"
-
-        category = "section" if self.cmb_role.currentText() == "Students" else "job"
-
-        query = f"SELECT name, {category}, contact FROM {role}"
+        query = f"SELECT name, role, section_or_job, contact FROM person_info"
 
         try:
             cursor.execute(query)
@@ -111,9 +105,54 @@ class UserManagementPage(QWidget):
         finally:
             conn.close()
 
+    def filter_data(self):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        name = self.filter_name.text().strip()
+        section = self.filter_section.text().strip()
+        role = self.filter_role.currentText()
+
+        query = "SELECT name, role, section_or_job, contact FROM person_info WHERE 1=1"
+        params = []
+
+        if name:
+            query += " AND name ILIKE %s"
+            params.append(f"%{name}%")
+
+        if section:
+            query += " AND section_or_job ILIKE %s"
+            params.append(f"%{section}%")
+
+        if role != "All":
+            query += " AND role = %s"
+            params.append(role)
+
+        try:
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+
+            self.table.setRowCount(0)  # Clear table before inserting filtered results
+
+            for row_data in rows:
+                row_position = self.table.rowCount()
+                self.table.insertRow(row_position)
+                for column, data in enumerate(row_data):
+                    self.table.setItem(row_position, column, QTableWidgetItem(str(data)))
+
+        except Exception as e:
+            print("Filter error:", e)
+        finally:
+            conn.close()
+
+
 class AddPersonWindow(QDialog):
     def __init__(self):
         super().__init__()
+        self.face_detection_service = FaceDetectionService.get_instance()
+        self.camera_manager = CameraManager()
+        self.camera_manager.start()
+
         self.capture_angles = ["front", "left", "right", "up", "down"]
         self.current_angle_index = 0
         self.captures_per_angle = 5
@@ -121,92 +160,63 @@ class AddPersonWindow(QDialog):
         self.embeddings_buffer = []
         self.scale = 0.5
 
-        self.resize(300, 300)
+        self.resize(600, 320)
         screen_geometry = QGuiApplication.primaryScreen().geometry()
         self.move(screen_geometry.center() - self.rect().center())
 
         self.setWindowTitle("Add a Person")
-        layout = QVBoxLayout()
-        self.setLayout(layout)
 
+        main_layout = QHBoxLayout()
+        self.setLayout(main_layout)
+
+        # Left: Camera feed
         self.image_label = QLabel(self)
-        self.image_label.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.image_label.setFixedSize(320, 240)
         self.image_label.setAlignment(Qt.AlignCenter)
+        main_layout.addWidget(self.image_label)
 
+        # Right: Form inputs
+        form_layout = QVBoxLayout()
+
+        lbl_name = QLabel("Name:")
+        self.ent_name = QLineEdit()
+
+        lbl_role = QLabel("Role:")
+        self.role_person = QComboBox()
+        self.role_person.addItems(["Students", "Staff"])
+
+        lbl_section_job = QLabel("Section / Job:")
+        self.ent_section_job = QLineEdit()
+
+        lbl_contact = QLabel("Contact:")
+        self.ent_contact = QLineEdit()
+
+        self.btn_save = QPushButton("Save")
+        self.btn_save.clicked.connect(self.start_capture_sequence)
+
+        form_layout.addWidget(lbl_name)
+        form_layout.addWidget(self.ent_name)
+        form_layout.addWidget(lbl_role)
+        form_layout.addWidget(self.role_person)
+        form_layout.addWidget(lbl_section_job)
+        form_layout.addWidget(self.ent_section_job)
+        form_layout.addWidget(lbl_contact)
+        form_layout.addWidget(self.ent_contact)
+        form_layout.addStretch()
+        form_layout.addWidget(self.btn_save)
+
+        main_layout.addLayout(form_layout)
+
+        # Timer and camera capture setup
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.update_frame)
         self.timer.start(30)
 
         self.cap = cv2.VideoCapture(0)
 
-        self.face_analyzer = FaceAnalysis(name="buffalo_s", providers=['CPUExecutionProvider'])
-        self.face_analyzer.prepare(ctx_id=-1)
 
         self.detected_faces = []
 
-        self.role_person = QComboBox()
-        self.role_person.addItems(["Students", "Staff"])
-        self.role_person.currentIndexChanged.connect(self.switch_role)
-        self.role_person.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-
-        self.student_widget = QWidget(self)
-        self.student_widget.setFixedSize(300, 300)
-        student_layout = QVBoxLayout(self.student_widget)
-
-        QLabel("ID:")  # Not stored
-        ent_student_id = QLineEdit()
-
-        lbl_student_name = QLabel("Name:")
-        self.ent_student_name = QLineEdit()
-
-        lbl_student_section = QLabel("Section:")
-        self.ent_student_section = QLineEdit()
-
-        lbl_student_contact = QLabel("Contact No:")
-        self.ent_student_contact = QLineEdit()
-
-        btn_student_save = QPushButton("Save")
-        btn_student_save.clicked.connect(self.start_capture_sequence)
-
-        student_layout.addWidget(lbl_student_name)
-        student_layout.addWidget(self.ent_student_name)
-        student_layout.addWidget(lbl_student_section)
-        student_layout.addWidget(self.ent_student_section)
-        student_layout.addWidget(lbl_student_contact)
-        student_layout.addWidget(self.ent_student_contact)
-        student_layout.addWidget(btn_student_save)
-
-        self.staff_widget = QWidget(self)
-        self.staff_widget.setFixedSize(300, 300)
-        staff_layout = QVBoxLayout(self.staff_widget)
-
-        lbl_staff_name = QLabel("Name:")
-        self.ent_staff_name = QLineEdit()
-
-        lbl_staff_job = QLabel("Job:")
-        self.ent_staff_job = QLineEdit()
-
-        lbl_staff_contact = QLabel("Contact No:")
-        self.ent_staff_contact = QLineEdit()
-
-        btn_staff_save = QPushButton("Save")
-        btn_staff_save.clicked.connect(self.start_capture_sequence)
-
-        staff_layout.addWidget(lbl_staff_name)
-        staff_layout.addWidget(self.ent_staff_name)
-        staff_layout.addWidget(lbl_staff_job)
-        staff_layout.addWidget(self.ent_staff_job)
-        staff_layout.addWidget(lbl_staff_contact)
-        staff_layout.addWidget(self.ent_staff_contact)
-        staff_layout.addWidget(btn_staff_save)
-
-        self.stack = QStackedWidget(self)
-        self.stack.addWidget(self.student_widget)
-        self.stack.addWidget(self.staff_widget)
-
-        layout.addWidget(self.image_label)
-        layout.addWidget(self.role_person)
-        layout.addWidget(self.stack)
 
     def start_capture_sequence(self):
         self.current_angle_index = 0
@@ -253,29 +263,21 @@ class AddPersonWindow(QDialog):
             self.current_angle_index += 1
             self.prompt_next_angle()
 
-    def switch_role(self):
-        if self.role_person.currentText() == "Students":
-            self.stack.setCurrentWidget(self.student_widget)
-        else:
-            self.stack.setCurrentWidget(self.staff_widget)
-
     def update_frame(self):
-        ret, frame = self.cap.read()
-        if not ret:
+        try:
+            frame = self.camera_manager.read()
+        except Exception as e:
+            print(f"Camera error: {e}")
             return
 
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         small_frame = cv2.resize(rgb_frame, (0, 0), fx=self.scale, fy=self.scale)
-        self.detected_faces = self.face_analyzer.get(small_frame)
+        self.detected_faces = self.face_detection_service.detect_faces(small_frame)
 
         for face in self.detected_faces:
             box = (face.bbox / self.scale).astype(int)
             x1, y1, x2, y2 = box
-
-            # Draw face bounding box
             cv2.rectangle(rgb_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Draw facial landmarks if available
             for landmark in (face.kps / self.scale):
                 cv2.circle(rgb_frame, tuple(landmark.astype(int)), 2, (0, 0, 255), -1)
 
@@ -293,19 +295,13 @@ class AddPersonWindow(QDialog):
         embedding = embedding / norm(embedding)
 
         role = self.role_person.currentText()
-        if role == "Students":
-            name = self.ent_student_name.text().strip()
-            section = self.ent_student_section.text().strip()
-            contact = self.ent_student_contact.text().strip()
-        else:
-            name = self.ent_staff_name.text().strip()
-            section = ""
-            contact = self.ent_staff_contact.text().strip()
+        name = self.ent_name.text().strip()
+        section_or_job = self.ent_section_job.text().strip()
+        contact = self.ent_contact.text().strip()
 
-        job = self.ent_staff_job.text().strip() if role == "Staff" else ""
 
-        if not name:
-            print("Please enter a name before saving.")
+        if not name or not section_or_job:
+            print("Please enter name and section/job before saving.")
             return
 
         save_dir = "encoding"
@@ -319,16 +315,10 @@ class AddPersonWindow(QDialog):
         try:
             conn = get_connection()
             cursor = conn.cursor()
-            if role == "Students":
-                cursor.execute(
-                    "INSERT INTO student_info (name, section, contact, npy_path) VALUES (%s, %s, %s, %s)",
-                    (name, section, contact, file_path)
-                )
-            else:
-                cursor.execute(
-                    "INSERT INTO staff_info (name, job, contact, npy_path) VALUES (%s, %s, %s, %s)",
-                    (name, job, contact, file_path)
-                )
+            cursor.execute(
+                "INSERT INTO person_info (name, role, section_or_job, contact, npy_path) VALUES (%s, %s, %s, %s, %s)",
+                (name, role, section_or_job, contact, file_path)
+            )
             conn.commit()
             cursor.close()
             conn.close()
@@ -337,5 +327,6 @@ class AddPersonWindow(QDialog):
             print(f"Error saving to database: {e}")
 
     def closeEvent(self, event):
-        self.cap.release()
+        self.camera_manager.stop()
+        super().closeEvent(event)
 

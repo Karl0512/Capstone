@@ -11,7 +11,7 @@ from Components.menu_component import MenuWidget
 from Pages.dashboard_page import DashboardPage  # Make sure the path is correct
 from Pages.live_recognition_page import LiveRecognitionPage  # Make sure the path is correct
 from Pages.user_management import UserManagementPage  # Make sure the path is correct
-from Pages.attendance_logs import AttendanceLogsPage  # Make sure the path is correct
+from Pages.monitoring_logs import MonitoringLogs  # Make sure the path is correct
 from Pages.analytics_page import AnalyticsPage  # Make sure the path is correct
 from Pages.user_management import AddPersonWindow
 
@@ -76,11 +76,11 @@ class MainPage(QWidget):
                 self.content_area.addWidget(self.user_management_page)
             self.content_area.setCurrentWidget(self.user_management_page)
 
-        elif page_name == "attendance":
-            if not hasattr(self, 'attendance_logs_page'):
-                self.attendance_logs_page = AttendanceLogsPage()
-                self.content_area.addWidget(self.attendance_logs_page)
-            self.content_area.setCurrentWidget(self.attendance_logs_page)
+        elif page_name == "monitoring":
+            if not hasattr(self, 'monitoring_logs_page'):
+                self.monitoring_logs_page = MonitoringLogs()
+                self.content_area.addWidget(self.monitoring_logs_page)
+            self.content_area.setCurrentWidget(self.monitoring_logs_page)
 
         elif page_name == "analytics":
             if not hasattr(self, 'analytics_page'):

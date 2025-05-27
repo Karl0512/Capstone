@@ -28,6 +28,9 @@ class MenuWidget(QWidget):
                 font-weight: normal;
                 font-size: 24px;
                 transition: all 0.3s ease-in-out;
+                text-align: left;
+                margin-left: 10px;
+                margin-right: 10px;
             }
 
             QPushButton:hover {
@@ -52,31 +55,31 @@ class MenuWidget(QWidget):
 
 
         # Dashboard Menu Button
-        self.dashboard_btn = QPushButton("Dashboard")
+        self.dashboard_btn = QPushButton("   Dashboard")
         self.dashboard_btn.setIcon(QIcon("assests/icons/home_icon.svg"))
         self.dashboard_btn.setIconSize(QSize(24, 24))
 
         # Live recognition Menu Button
-        self.live_recognition_button = QPushButton("Live Recognition")
+        self.live_recognition_button = QPushButton("   Live Recognition")
         self.live_recognition_button.setIcon(QIcon("assests/icons/recognition.svg"))
         self.live_recognition_button.setIconSize(QSize(24, 24))
 
-        self.user_management_btn = QPushButton("User Management")
+        self.user_management_btn = QPushButton("   User Management")
         self.user_management_btn.setIcon(QIcon("assests/icons/user.svg"))
         self.user_management_btn.setIconSize(QSize(24, 24))
 
-        self.attendance_logs_btn = QPushButton("Attendance Logs")
+        self.attendance_logs_btn = QPushButton("   Monitoring Logs")
         self.attendance_logs_btn.setIcon(QIcon("assests/icons/attendance_icon.svg"))
         self.attendance_logs_btn.setIconSize(QSize(24, 24))
 
-        self.analytics_btn = QPushButton("Analytics")
+        self.analytics_btn = QPushButton("   Analytics")
         self.analytics_btn.setIcon(QIcon("assests/icons/analytics_icon.svg"))
         self.analytics_btn.setIconSize(QSize(24, 24))
 
         self.dashboard_btn.clicked.connect(lambda: self.main_window.navigate_to("main"))
         self.live_recognition_button.clicked.connect(lambda: self.main_window.navigate_to("recognition"))
         self.user_management_btn.clicked.connect(lambda: self.main_window.navigate_to("user"))
-        self.attendance_logs_btn.clicked.connect(lambda: self.main_window.navigate_to("attendance"))
+        self.attendance_logs_btn.clicked.connect(lambda: self.main_window.navigate_to("monitoring"))
         self.analytics_btn.clicked.connect(lambda: self.main_window.navigate_to("analytics"))
 
         layout.addWidget(logo_label, alignment=Qt.AlignHCenter)
