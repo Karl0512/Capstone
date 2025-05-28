@@ -1,3 +1,5 @@
+from itertools import count
+
 import faiss
 import numpy as np
 from numpy.linalg import norm
@@ -78,7 +80,7 @@ class FaceIndexer:
             print(f"❌ Unexpected error in building FAISS index: {e}")
             return None
 
-    def recognize_face(self, new_embedding, threshold=1.2, camera_purpose=None):
+    def recognize_face(self, new_embedding, threshold=1.2, camera_purpose=None, location=None):
         new_embedding = new_embedding / norm(new_embedding)
         new_embedding = np.array([new_embedding], dtype=np.float32)
 
@@ -96,10 +98,11 @@ class FaceIndexer:
 
         if indices[0][0] != -1 and distances[0][0] < threshold:
             recognized_info = self.infos[indices[0][0]]
-            print(f"✅ Face recognized: {recognized_info['name']} (ID: {recognized_info['id']}) has {'Entered' if camera_purpose == 'Entry' else 'Exited'}")
+            print(f"✅ Face recognized: {recognized_info['name']} (ID: {recognized_info['id']}) has {'Entered' if camera_purpose == 'Entry' else 'Exited'} at {location}")
 
             # Get current date as string (YYYY-MM-DD)
             current_date = datetime.now().strftime('%Y-%m-%d')
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             name = recognized_info['name']
             role = recognized_info.get('role', 'unknown')
             section = recognized_info.get('section', 'unknown')
@@ -108,29 +111,45 @@ class FaceIndexer:
             conn = get_connection()
             cursor = conn.cursor()
 
-            # Check if entry exists for this name and date
-            cursor.execute("""
-                SELECT COUNT(*) FROM gate_logs
-                WHERE name = %s AND timestamp = %s AND purpose = %s
-            """, (name, current_date, camera_purpose))
-
-            (count,) = cursor.fetchone()
-
-            if count == 0:
-                # Insert new log
+            if location.lower() == 'gate':
+                # Check if entry exists for this name and date
+                print("going to gate logs")
                 cursor.execute("""
-                    INSERT INTO gate_logs (name, timestamp, role, purpose, section)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (name, current_date, role, camera_purpose, section))
-                conn.commit()
-                print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
+                                SELECT COUNT(*) FROM gate_logs
+                                WHERE name = %s AND timestamp = %s AND purpose = %s
+                            """, (name, current_date, camera_purpose))
+
+                (count,) = cursor.fetchone()
+
+                if count == 0:
+                    # Insert new log
+                    cursor.execute("""
+                                    INSERT INTO gate_logs (name, timestamp, role, purpose, section)
+                                    VALUES (%s, %s, %s, %s, %s)
+                                """, (name, timestamp, role, camera_purpose, section))
+                    conn.commit()
+                    print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
+                else:
+                    print(f"ℹ️ Entry log already exists for {name} on {current_date}, skipping insert.")
+
+                cursor.close()
+                conn.close()
+
+                return recognized_info
             else:
-                print(f"ℹ️ Entry log already exists for {name} on {current_date}, skipping insert.")
+                try:
+                    cursor.execute("""INSERT INTO room_logs (name, timestamp, role, purpose, section, room)
+                                                            VALUES (%s, %s, %s, %s, %s, %s)""", (name, timestamp, role, camera_purpose, section, location))
+                    conn.commit()
+                    print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
 
-            cursor.close()
-            conn.close()
+                except Exception as e:
+                    print(f"Error: {e}")
 
-            return recognized_info
+                cursor.close()
+                conn.close()
+
+                return recognized_info
 
         else:
             print("❌ No match found or the match is not strict enough")

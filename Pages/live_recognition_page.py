@@ -62,7 +62,8 @@ class LiveRecognitionPage(QWidget):
                 source=cam_source,
                 source_type=source_type,
                 label=label,
-                purpose=purpose  # <- Pass purpose
+                purpose=purpose, # <- Pass purpose
+                location=location
             )
             self.cameras_layout.addWidget(camera_widget)
             self.camera_widgets.append(camera_widget)
@@ -115,8 +116,8 @@ class AddCameraDialog(QDialog):
         layout.addWidget(QLabel("Purpose:"))
         layout.addWidget(self.purpose_selector)
 
-        self.location_selector = QComboBox()
-        self.location_selector.addItems(["Gate", "Room"])
+        self.location_selector = QLineEdit()
+        self.location_selector.setPlaceholderText("e.g., Gate, Room")
         layout.addWidget(QLabel("Location:"))
         layout.addWidget(self.location_selector)
 
@@ -143,7 +144,7 @@ class AddCameraDialog(QDialog):
                 self.device_selector.currentText(),  # source (label)
                 self.device_selector.currentData(),  # index
                 self.purpose_selector.currentText(),
-                self.location_selector.currentText(),
+                self.location_selector.text().strip(),
                 camera_type,
                 None
             )
@@ -152,7 +153,7 @@ class AddCameraDialog(QDialog):
                 self.rtsp_input.text(),  # source (label and RTSP)
                 None,
                 self.purpose_selector.currentText(),
-                self.location_selector.currentText(),
+                self.location_selector.text().strip(),
                 camera_type,
                 self.rtsp_input.text()
             )
@@ -180,12 +181,13 @@ class FaceDetectionWorker(QObject):
 class CameraFeedWidget(QWidget):
     finished = Signal()
 
-    def __init__(self, source, source_type='wired', label='Camera', purpose='Entry', parent=None):
+    def __init__(self, source, source_type='wired', label='Camera', purpose='Entry', location='Gate', parent=None):
         super().__init__(parent)
         self.label = label
         self.source = source
         self.source_type = source_type
         self.purpose = purpose
+        self.location = location
         self.cap = None
         self.timer = QTimer(self)
         self.last_display_time = 0
@@ -320,7 +322,7 @@ class CameraFeedWidget(QWidget):
                     "last_seen": self.frame_counter,
                     "kps": getattr(face, 'kps', None)
                 }
-                self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose)
+                self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose, location=self.location)
 
         # Remove expired faces
         current_frame = self.frame_counter

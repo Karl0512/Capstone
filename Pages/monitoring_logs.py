@@ -93,8 +93,8 @@ class MonitoringLogs(QWidget):
 
         # Entry/Exit table
         self.table = QTableWidget()
-        self.table.setColumnCount(3)
-        self.table.setHorizontalHeaderLabels(["Name", "Timestamp", "Role"])
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["Name", "Timestamp", "Role", "Action"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
 
@@ -131,7 +131,7 @@ class MonitoringLogs(QWidget):
         conn = get_connection()
         cursor = conn.cursor()
 
-        query = "SELECT name, timestamp, role FROM gate_logs WHERE 1=1"
+        query = "SELECT name, timestamp, role, purpose FROM gate_logs WHERE 1=1"
         params = []
 
         if name_filter:
@@ -150,10 +150,11 @@ class MonitoringLogs(QWidget):
         logs = cursor.fetchall()
 
         self.table.setRowCount(len(logs))
-        for row_idx, (name, timestamp, role) in enumerate(logs):
+        for row_idx, (name, timestamp, role, purpose) in enumerate(logs):
             self.table.setItem(row_idx, 0, QTableWidgetItem(name))
             self.table.setItem(row_idx, 1, QTableWidgetItem(str(timestamp)))
             self.table.setItem(row_idx, 2, QTableWidgetItem(role))
+            self.table.setItem(row_idx, 3, QTableWidgetItem(purpose))
 
         conn.close()
 
