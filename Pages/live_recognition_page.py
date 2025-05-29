@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QDialog, QPushButton, QDialogButtonBox, QLineEdit, QScrollArea
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QSizePolicy, QComboBox, QDialog, QPushButton, QDialogButtonBox, QLineEdit, QScrollArea, QHBoxLayout, QSpacerItem
 from PySide6.QtCore import Qt, QTimer, QObject, Signal, QThread
 from PySide6.QtGui import QFont, QImage, QPixmap
 from pygrabber.dshow_graph import FilterGraph
@@ -9,7 +9,11 @@ import uuid
 import time
 from Features.face_indexer import FaceIndexer
 from Features.face_services import FaceDetectionService
+from functools import partial
+import json
+import os
 
+CONFIG_PATH = "./camera_config.json"
 
 class LiveRecognitionPage(QWidget):
     def __init__(self):
@@ -19,28 +23,80 @@ class LiveRecognitionPage(QWidget):
 
     def init_ui(self):
         self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(20, 20, 20, 20)
+        self.layout.setSpacing(15)
         self.setLayout(self.layout)
 
+        # --- Title and Add Button in One Row ---
+        title_bar = QHBoxLayout()
+        title_bar.setSpacing(10)
+
         title = QLabel("Multi-Camera Live Recognition")
-        title.setFont(QFont("Arial", 20))
-        title.setAlignment(Qt.AlignCenter)
+        title.setFont(QFont("Segoe UI", 24, QFont.Bold))
+        title.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        title.setStyleSheet("color: #2C3E50;")  # dark blue-gray text
+
+        spacer = QSpacerItem(40, 20, QSizePolicy.Expanding, QSizePolicy.Minimum)
 
         self.add_camera_button = QPushButton("Add Camera")
+        self.add_camera_button.setFixedHeight(40)
         self.add_camera_button.clicked.connect(self.show_add_camera_dialog)
+        self.add_camera_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.add_camera_button.setStyleSheet("""
+            QPushButton {
+                background-color: #002366;  /* nice blue */
+                color: #FFD700;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 14px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #FFD700;
+                color: black;
+            }
+            QPushButton:pressed {
+                background-color: #1C5980;
+            }
+        """)
+
+        title_bar.addWidget(title)
+        title_bar.addItem(spacer)
+        title_bar.addWidget(self.add_camera_button)
 
         # Container widget inside scroll area to hold camera widgets
         self.camera_container = QWidget()
         self.cameras_layout = QVBoxLayout()
+        self.cameras_layout.setContentsMargins(5, 5, 5, 5)
+        self.cameras_layout.setSpacing(10)
         self.camera_container.setLayout(self.cameras_layout)
 
         # Scroll area that will contain the camera container
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setWidget(self.camera_container)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: 1px solid #BDC3C7;
+                border-radius: 8px;
+                background-color: #ECF0F1;
+            }
+            QScrollBar:vertical {
+                width: 12px;
+                background: #F0F3F4;
+            }
+            QScrollBar::handle:vertical {
+                background: #95A5A6;
+                border-radius: 6px;
+            }
+            QScrollBar::handle:vertical:hover {
+                background: #7F8C8D;
+            }
+        """)
 
-        self.layout.addWidget(title)
-        self.layout.addWidget(self.add_camera_button)
+        self.layout.addLayout(title_bar)
         self.layout.addWidget(self.scroll_area)
+        self.load_saved_cameras()
 
     def show_add_camera_dialog(self):
         graph = FilterGraph()
@@ -65,6 +121,42 @@ class LiveRecognitionPage(QWidget):
                 purpose=purpose, # <- Pass purpose
                 location=location
             )
+            print(f"ADDING camera_widget: {id(camera_widget)}")
+            camera_widget.finished.connect(partial(self.remove_camera_widget, camera_widget))
+            self.cameras_layout.addWidget(camera_widget)
+            self.camera_widgets.append(camera_widget)
+            self.save_camera_config()
+
+    def save_camera_config(self):
+        camera_data = []
+        for cam in self.camera_widgets:
+            camera_data.append({
+                "source": cam.source,
+                "source_type": cam.source_type,
+                "label": cam.label,
+                "purpose": cam.purpose,
+                "location": cam.location
+            })
+
+        with open(CONFIG_PATH, "w") as f:
+            json.dump(camera_data, f, indent=4)
+
+    def load_saved_cameras(self):
+        if not os.path.exists(CONFIG_PATH):
+            return
+
+        with open(CONFIG_PATH, "r") as f:
+            camera_data = json.load(f)
+
+        for cam in camera_data:
+            camera_widget = CameraFeedWidget(
+                source=cam["source"],
+                source_type=cam["source_type"],
+                label=cam["label"],
+                purpose=cam["purpose"],
+                location=cam["location"]
+            )
+            camera_widget.finished.connect(partial(self.remove_camera_widget, camera_widget))
             self.cameras_layout.addWidget(camera_widget)
             self.camera_widgets.append(camera_widget)
 
@@ -72,6 +164,20 @@ class LiveRecognitionPage(QWidget):
         for camera in self.camera_widgets:
             camera.stop_camera()
         event.accept()
+
+    def remove_camera_widget(self, camera_widget):
+        print(f"REMOVING camera_widget: {id(camera_widget)}")
+        self.save_camera_config()
+        camera_widget.stop_camera()
+        self.cameras_layout.removeWidget(camera_widget)
+
+        if camera_widget in self.camera_widgets:
+            self.camera_widgets.remove(camera_widget)
+            print("Successfully removed from list.")
+        else:
+            print("WARNING: camera_widget not in camera_widgets list!")
+
+        camera_widget.deleteLater()
 
 class AddCameraDialog(QDialog):
     def __init__(self, devices, parent=None):
@@ -116,8 +222,8 @@ class AddCameraDialog(QDialog):
         layout.addWidget(QLabel("Purpose:"))
         layout.addWidget(self.purpose_selector)
 
-        self.location_selector = QLineEdit()
-        self.location_selector.setPlaceholderText("e.g., Gate, Room")
+        self.location_selector = QComboBox()
+        self.location_selector.addItems(["Gate", "Grade 1 Room", "Grade 2 Room", "Grade 3 Room", "Grade 4 Room", "Grade 5 Room", "Grade 6 Room", "Grade 7 Room", "Grade 8 Room", "Grade 9 Room", "Grade 10 Room"])
         layout.addWidget(QLabel("Location:"))
         layout.addWidget(self.location_selector)
 
@@ -144,7 +250,7 @@ class AddCameraDialog(QDialog):
                 self.device_selector.currentText(),  # source (label)
                 self.device_selector.currentData(),  # index
                 self.purpose_selector.currentText(),
-                self.location_selector.text().strip(),
+                self.location_selector.currentText(),
                 camera_type,
                 None
             )
@@ -153,7 +259,7 @@ class AddCameraDialog(QDialog):
                 self.rtsp_input.text(),  # source (label and RTSP)
                 None,
                 self.purpose_selector.currentText(),
-                self.location_selector.text().strip(),
+                self.location_selector.currentText(),
                 camera_type,
                 self.rtsp_input.text()
             )
@@ -212,22 +318,84 @@ class CameraFeedWidget(QWidget):
         self.init_ui()
         self.init_connections()
         self.start_camera()
+        self.show_preview = True
 
     def init_ui(self):
         layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
         self.setLayout(layout)
 
         self.title = QLabel(self.label)
         self.title.setAlignment(Qt.AlignCenter)
+        self.title.setFont(QFont("Segoe UI", 16, QFont.DemiBold))
+        self.title.setStyleSheet("color: #34495E;")  # dark slate blue
+
         self.image_label = QLabel()
         self.image_label.setFixedSize(640, 480)
-        self.image_label.setStyleSheet("background-color: gray")
+        self.image_label.setStyleSheet("""
+            background-color: #002366;  /* medium gray */
+            border-radius: 12px;
+            border: 2px solid #7F8C8D;
+        """)
+
+        # Add horizontal layout for buttons
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+
+        self.close_button = QPushButton("Close Camera")
+        self.close_button.setFixedWidth(130)
+        self.close_button.setStyleSheet("""
+            QPushButton {
+                background-color: #E74C3C;  /* Red */
+                color: white;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 8px 12px;
+            }
+            QPushButton:hover {
+                background-color: #C0392B;
+            }
+            QPushButton:pressed {
+                background-color: #A93226;
+            }
+        """)
+        button_layout.addWidget(self.close_button)
+
+        self.toggle_preview_button = QPushButton("Turn Off Preview")
+        self.toggle_preview_button.setFixedWidth(130)
+        button_layout.addWidget(self.toggle_preview_button)
+        self.toggle_preview_button.setStyleSheet("""
+            QPushButton {
+                background-color: #002366;  /* Blue */
+                color: #FFD700;
+                border: none;
+                border-radius: 6px;
+                font-size: 13px;
+                font-weight: bold;
+                padding: 8px 12px;
+            }
+            QPushButton:hover {
+                background-color: #FFD700;
+                color: black;
+            }
+            QPushButton:pressed {
+                background-color: #1F618D;
+            }
+        """)
+        self.toggle_preview_button.clicked.connect(self.toggle_preview)
+
         layout.addWidget(self.title)
-        layout.addWidget(self.image_label)
+        layout.addWidget(self.image_label, alignment=Qt.AlignHCenter)
+        layout.addLayout(button_layout)
+
 
     def init_connections(self):
         self.timer.timeout.connect(self.update_frame)
         self.face_worker.detection_complete.connect(self.handle_detection_results)
+        self.close_button.clicked.connect(self.stop_camera)
 
     def iou(self, box1, box2):
         """Calculate Intersection over Union for two bounding boxes"""
@@ -278,7 +446,11 @@ class CameraFeedWidget(QWidget):
         self.draw_face_annotations(rgb_frame)
 
         # Display the frame
-        self.display_frame(rgb_frame)
+        if self.show_preview:
+            self.display_frame(rgb_frame)
+        else:
+            self.image_label.clear()
+
         self.last_display_time = current_time
 
         # Start face detection every 2nd frame if we're not already processing
@@ -314,15 +486,17 @@ class CameraFeedWidget(QWidget):
                 if hasattr(face, 'normed_embedding'):
                     self.tracked_faces[best_match_id]["embedding"] = face.normed_embedding
             elif hasattr(face, 'normed_embedding'):
+                info = self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose, location=self.location)
+                recognize_name = info.get("name") if info else "Unknown"
                 # Add new face
                 new_id = str(uuid.uuid4())
                 self.tracked_faces[new_id] = {
                     "bbox": box,
                     "embedding": face.normed_embedding,
                     "last_seen": self.frame_counter,
-                    "kps": getattr(face, 'kps', None)
+                    "kps": getattr(face, 'kps', None),
+                    "name": recognize_name or "Unknown"
                 }
-                self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose, location=self.location)
 
         # Remove expired faces
         current_frame = self.frame_counter
@@ -332,23 +506,24 @@ class CameraFeedWidget(QWidget):
             del self.tracked_faces[face_id]
 
     def draw_face_annotations(self, frame):
-        """Draw face bounding boxes and landmarks on the frame"""
         for face_id, data in self.tracked_faces.items():
             x1, y1, x2, y2 = data["bbox"]
-            # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
 
-            # Draw face ID
-            cv2.putText(frame, f"ID: {face_id[:8]}", (x1, y1 - 10),
+            # Ensure name is a string, fallback to 'Unknown'
+            name = data.get("name", "Unknown")
+            if not isinstance(name, str):
+                name = str(name)  # Convert to string just in case
+
+            cv2.putText(frame, name, (x1, y1 - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
 
-            # Draw landmarks if available
             if "kps" in data and data["kps"] is not None:
                 for landmark in (data["kps"] / self.face_worker.scale):
                     cv2.circle(frame, tuple(landmark.astype(int)), 2, (0, 0, 255), -1)
 
-        # Update display
-        self.display_frame(frame)
+        if self.show_preview:
+            self.display_frame(frame)
 
     def display_frame(self, frame):
         """Display the frame in the QLabel"""
@@ -362,9 +537,22 @@ class CameraFeedWidget(QWidget):
         ))
 
     def stop_camera(self):
-        """Clean up camera resources"""
-        if self.cap:
+        if self.timer.isActive():
+            self.timer.stop()
+        if self.cap is not None:
             self.cap.release()
-        self.timer.stop()
-        self.face_thread.quit()
-        self.face_thread.wait()
+            self.cap = None
+        if self.face_thread.isRunning():
+            self.face_thread.quit()
+            self.face_thread.wait()
+        self.deleteLater()
+
+    def toggle_preview(self):
+        if self.show_preview:
+            self.show_preview = False
+            self.toggle_preview_button.setText("Show Preview")
+            self.image_label.clear()  # Clear GUI preview immediately
+        else:
+            self.show_preview = True
+            self.toggle_preview_button.setText("Turn Off Preview")
+

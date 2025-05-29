@@ -1,7 +1,7 @@
 # dashboard_page.py
 import os
 
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QLineEdit, QStackedWidget, QMessageBox
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QLineEdit, QStackedWidget, QMessageBox, QFrame
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QFont, QStandardItemModel, QStandardItem, QGuiApplication, QImage, QPixmap
 import cv2
@@ -20,28 +20,57 @@ from db.database import get_connection
 class UserManagementPage(QWidget):
     def __init__(self):
         super().__init__()
+        self.setStyleSheet("""
+            QLabel {
+                font-size: 18px;
+                font-weight: bold;
+            }
+            QPushButton {
+                background-color: #002366;
+                color: #FFD700;
+                padding: 6px 14px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #FFD700;
+                color: #000;
+            }
+            QLineEdit, QComboBox {
+                padding: 5px;
+                font-size: 14px;
+                border: 1px solid #ccc;
+                border-radius: 4px;
+            }
+        """)
 
         layout = QVBoxLayout()
-        layout.setSpacing(0)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
 
-        # --- First Section: Title and Add Button ---
+        # --- Title and Add Button ---
         first_section = QWidget(self)
         first_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         title_layout = QHBoxLayout(first_section)
+        title_layout.setContentsMargins(0, 0, 0, 0)
 
-        lbl_title = QLabel("User Management", first_section)
-        btn_add = QPushButton("Add a Person", first_section)
+        lbl_title = QLabel("User Management")
+        lbl_title.setFont(QFont("Arial", 20, QFont.Bold))
+
+        btn_add = QPushButton("+ Add a Person")
+        btn_add.setFixedHeight(34)
         btn_add.clicked.connect(self.open_add_person_window)
 
         title_layout.addWidget(lbl_title)
         title_layout.addStretch()
         title_layout.addWidget(btn_add)
 
-        # --- Second Section: Filters ---
-        second_section = QWidget(self)
-        second_section.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+        # --- Filters ---
+        second_section = QFrame(self)
+        second_section.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         filter_layout = QHBoxLayout(second_section)
+        filter_layout.setSpacing(8)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
 
         self.filter_name = QLineEdit()
         self.filter_name.setPlaceholderText("Filter by name")
@@ -53,7 +82,7 @@ class UserManagementPage(QWidget):
         self.filter_role.addItem("All")
         self.filter_role.addItems(["Students", "Staff"])
 
-        btn_filter = QPushButton("Filter")
+        btn_filter = QPushButton("Apply Filters")
         btn_filter.clicked.connect(self.filter_data)
 
         filter_layout.addWidget(self.filter_name)
@@ -67,15 +96,14 @@ class UserManagementPage(QWidget):
         self.table.setHorizontalHeaderLabels(["Name", "Role", "Section / Job", "Contact No"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
 
-        self.load_data_from_db(self.table)  # Load initial data with no filter
+        self.load_data_from_db(self.table)
 
-        # --- Add widgets to layout ---
         layout.addWidget(first_section)
         layout.addWidget(second_section)
         layout.addWidget(self.table)
 
         self.setLayout(layout)
-        self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
     def open_add_person_window(self):
         dialog = AddPersonWindow()

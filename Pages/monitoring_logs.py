@@ -39,15 +39,39 @@ class MonitoringLogs(QWidget):
         layout = QVBoxLayout()
         self.entry_exit_tab.setLayout(layout)
 
+        input_style = """
+                            QLineEdit, QDateEdit, QTimeEdit, QComboBox {
+                                padding: 6px;
+                                border: 1px solid #BDC3C7;
+                                border-radius: 6px;
+                                background-color: #F9F9F9;
+                            }
+                        """
+
         # Filter layout
         top_filter_layout = QHBoxLayout()
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Search by name")
+        self.name_input.setStyleSheet(input_style)
         top_filter_layout.addWidget(QLabel("Name:"))
         top_filter_layout.addWidget(self.name_input)
 
-        self.toggle_button = QPushButton("▼ Show Filters")
+        self.toggle_button = QPushButton("\u25BC Show Filters")
         self.toggle_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.toggle_button.setStyleSheet("""
+            QPushButton {
+                background-color: #002366;
+                color: #FFD700;
+                font-weight: bold;
+                border: none;
+                border-radius: 6px;
+                padding: 6px 12px;
+            }
+            QPushButton:hover {
+                background-color: #FFD700;
+                color: black;
+            }
+        """)
         self.toggle_button.clicked.connect(self.toggle_filters)
         top_filter_layout.addWidget(self.toggle_button)
 
@@ -60,20 +84,25 @@ class MonitoringLogs(QWidget):
 
         self.role_combo = QComboBox()
         self.role_combo.addItems(["All", "Staff", "Student"])
+        self.role_combo.setStyleSheet(input_style)
 
         self.start_date = QDateEdit()
         self.start_date.setCalendarPopup(True)
         self.start_date.setDate(QDate.currentDate())
+        self.start_date.setStyleSheet(input_style)
 
         self.start_time = QTimeEdit()
         self.start_time.setTime(QTime(0, 0))
+        self.start_time.setStyleSheet(input_style)
 
         self.end_date = QDateEdit()
         self.end_date.setCalendarPopup(True)
         self.end_date.setDate(QDate.currentDate())
+        self.end_date.setStyleSheet(input_style)
 
         self.end_time = QTimeEdit()
         self.end_time.setTime(QTime(23, 59))
+        self.end_time.setStyleSheet(input_style)
 
         self.advanced_filters_layout.addWidget(QLabel("Role:"))
         self.advanced_filters_layout.addWidget(self.role_combo)
@@ -85,6 +114,19 @@ class MonitoringLogs(QWidget):
         self.advanced_filters_layout.addWidget(self.end_time)
 
         self.search_button = QPushButton("Search")
+        self.search_button.setStyleSheet("""
+            QPushButton {
+                background-color: #002366;
+                color: #FFD700;
+                font-weight: bold;
+                padding: 6px 12px;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #FFD700;
+                color: black;
+            }
+        """)
         self.search_button.clicked.connect(self.load_logs)
         self.advanced_filters_layout.addWidget(self.search_button)
 
@@ -104,13 +146,88 @@ class MonitoringLogs(QWidget):
         layout = QVBoxLayout()
         self.room_entry_exit_tab.setLayout(layout)
 
-        label = QLabel("Room Entry/Exit Logs")
-        label.setFont(QFont("Arial", 14))
-        layout.addWidget(label)
+        top_filter_layout = QHBoxLayout()
+        top_filter_layout.setSpacing(10)
 
+        input_style = """
+                    QLineEdit, QDateEdit, QTimeEdit {
+                        padding: 6px;
+                        border: 1px solid #BDC3C7;
+                        border-radius: 6px;
+                        background-color: #F9F9F9;
+                    }
+                """
+
+        self.room_name_input = QLineEdit()
+        self.room_name_input.setPlaceholderText("Search by name")
+        self.room_name_input.setStyleSheet(input_style)
+
+        name_label = QLabel("Name:")
+        top_filter_layout.addWidget(name_label)
+        top_filter_layout.addWidget(self.room_name_input)
+
+        self.room_filter_input = QLineEdit()
+        self.room_filter_input.setPlaceholderText("Search by room")
+        self.room_filter_input.setStyleSheet(input_style)
+
+        room_label = QLabel("Room:")
+        top_filter_layout.addWidget(room_label)
+        top_filter_layout.addWidget(self.room_filter_input)
+
+        self.room_start_date = QDateEdit()
+        self.room_start_date.setCalendarPopup(True)
+        self.room_start_date.setDate(QDate.currentDate())
+        self.room_start_date.setStyleSheet(input_style)
+
+        self.room_start_time = QTimeEdit()
+        self.room_start_time.setTime(QTime(0, 0))
+        self.room_start_time.setStyleSheet(input_style)
+
+        self.room_end_date = QDateEdit()
+        self.room_end_date.setCalendarPopup(True)
+        self.room_end_date.setDate(QDate.currentDate())
+        self.room_end_date.setStyleSheet(input_style)
+
+        self.room_end_time = QTimeEdit()
+        self.room_end_time.setTime(QTime(23, 59))
+        self.room_end_time.setStyleSheet(input_style)
+
+        from_label = QLabel("From:")
+        top_filter_layout.addWidget(from_label)
+        top_filter_layout.addWidget(self.room_start_date)
+        top_filter_layout.addWidget(self.room_start_time)
+
+        to_label = QLabel("To:")
+        top_filter_layout.addWidget(to_label)
+        top_filter_layout.addWidget(self.room_end_date)
+        top_filter_layout.addWidget(self.room_end_time)
+
+        self.room_search_button = QPushButton("Search")
+        self.room_search_button.setFixedHeight(36)
+        self.room_search_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2980B9;
+                        color: white;
+                        padding: 6px 14px;
+                        border-radius: 6px;
+                        font-weight: bold;
+                    }
+                    QPushButton:hover {
+                        background-color: #3498DB;
+                    }
+                    QPushButton:pressed {
+                        background-color: #2471A3;
+                    }
+                """)
+        self.room_search_button.clicked.connect(self.load_room_logs)
+        top_filter_layout.addWidget(self.room_search_button)
+
+        layout.addLayout(top_filter_layout)
+
+        # Table
         self.room_table = QTableWidget()
-        self.room_table.setColumnCount(4)
-        self.room_table.setHorizontalHeaderLabels(["Name", "Room", "Timestamp", "Action"])
+        self.room_table.setColumnCount(6)
+        self.room_table.setHorizontalHeaderLabels(["Name", "Role", "Timestamp", "Purpose", "Section", "Room"])
         self.room_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.room_table)
 
@@ -159,20 +276,41 @@ class MonitoringLogs(QWidget):
         conn.close()
 
     def load_room_logs(self):
-        print("hello")
+        name_filter = self.room_name_input.text().strip()
+        room_filter = self.room_filter_input.text().strip()
 
-        #conn = get_connection()
-        #cursor = conn.cursor()
+        start_dt = f"{self.room_start_date.date().toString('yyyy-MM-dd')} {self.room_start_time.time().toString('HH:mm:ss')}"
+        end_dt = f"{self.room_end_date.date().toString('yyyy-MM-dd')} {self.room_end_time.time().toString('HH:mm:ss')}"
 
-        # You should have a table like room_logs(name, room_name, timestamp, action)
-        #cursor.execute("SELECT name, room_name, timestamp, action FROM room_logs ORDER BY timestamp DESC")
-        """logs = cursor.fetchall()
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        query = "SELECT name, role, timestamp, purpose, section, room FROM room_logs WHERE role='Students'"
+        params = []
+
+        if name_filter:
+            query += " AND name ILIKE %s"
+            params.append(f"%{name_filter}%")
+
+        if room_filter:
+            query += " AND room ILIKE %s"
+            params.append(f"%{room_filter}%")
+
+        query += " AND timestamp BETWEEN %s AND %s"
+        params.extend([start_dt, end_dt])
+        query += " ORDER BY timestamp DESC"
+
+        cursor.execute(query, params)
+        logs = cursor.fetchall()
 
         self.room_table.setRowCount(len(logs))
-        for row_idx, (name, room_name, timestamp, action) in enumerate(logs):
+        for row_idx, (name, role, timestamp, purpose, section, room) in enumerate(logs):
             self.room_table.setItem(row_idx, 0, QTableWidgetItem(name))
-            self.room_table.setItem(row_idx, 1, QTableWidgetItem(room_name))
+            self.room_table.setItem(row_idx, 1, QTableWidgetItem(role))
             self.room_table.setItem(row_idx, 2, QTableWidgetItem(str(timestamp)))
-            self.room_table.setItem(row_idx, 3, QTableWidgetItem(action))
+            self.room_table.setItem(row_idx, 3, QTableWidgetItem(purpose))
+            self.room_table.setItem(row_idx, 4, QTableWidgetItem(section))
+            self.room_table.setItem(row_idx, 5, QTableWidgetItem(room))
 
-        conn.close()"""
+        conn.close()
+

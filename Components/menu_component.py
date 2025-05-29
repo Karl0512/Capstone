@@ -76,7 +76,7 @@ class MenuWidget(QWidget):
         self.analytics_btn.setIcon(QIcon("assests/icons/analytics_icon.svg"))
         self.analytics_btn.setIconSize(QSize(24, 24))
 
-        self.dashboard_btn.clicked.connect(lambda: self.main_window.navigate_to("main"))
+        self.dashboard_btn.clicked.connect(lambda: self.main_window.navigate_to("dashboard"))
         self.live_recognition_button.clicked.connect(lambda: self.main_window.navigate_to("recognition"))
         self.user_management_btn.clicked.connect(lambda: self.main_window.navigate_to("user"))
         self.attendance_logs_btn.clicked.connect(lambda: self.main_window.navigate_to("monitoring"))

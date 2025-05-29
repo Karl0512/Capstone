@@ -7,6 +7,8 @@ import os
 from db.database import get_connection
 import glob
 from datetime import datetime
+from Features.sms_notification import send_sms_notification
+import threading
 
 class FaceIndexer:
     def __init__(self):
@@ -106,6 +108,7 @@ class FaceIndexer:
             name = recognized_info['name']
             role = recognized_info.get('role', 'unknown')
             section = recognized_info.get('section', 'unknown')
+            contact = recognized_info.get('contact', 'unknown')
 
             # Check entry log and insert if not exist
             conn = get_connection()
@@ -116,7 +119,7 @@ class FaceIndexer:
                 print("going to gate logs")
                 cursor.execute("""
                                 SELECT COUNT(*) FROM gate_logs
-                                WHERE name = %s AND timestamp = %s AND purpose = %s
+                                WHERE name = %s AND DATE(timestamp) = %s AND purpose = %s
                             """, (name, current_date, camera_purpose))
 
                 (count,) = cursor.fetchone()
@@ -128,6 +131,7 @@ class FaceIndexer:
                                     VALUES (%s, %s, %s, %s, %s)
                                 """, (name, timestamp, role, camera_purpose, section))
                     conn.commit()
+                    send_sms_notification(contact, name, timestamp, camera_purpose)
                     print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
                 else:
                     print(f"ℹ️ Entry log already exists for {name} on {current_date}, skipping insert.")
@@ -155,6 +159,10 @@ class FaceIndexer:
             print("❌ No match found or the match is not strict enough")
             return None
 
+    def send_sms_notification_async(contact, name, timestamp, action):
+        thread = threading.Thread(target=send_sms_notification, args=(contact, name, timestamp, action))
+        thread.daemon = True  # Optional: lets thread exit when main program ends
+        thread.start()
 
 # Example of loading faces and recognizing a new face
 face_indexer = FaceIndexer()
