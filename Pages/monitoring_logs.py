@@ -83,7 +83,7 @@ class MonitoringLogs(QWidget):
         self.advanced_filters.setLayout(self.advanced_filters_layout)
 
         self.role_combo = QComboBox()
-        self.role_combo.addItems(["All", "Staff", "Student"])
+        self.role_combo.addItems(["All", "Staff", "Students"])
         self.role_combo.setStyleSheet(input_style)
 
         self.start_date = QDateEdit()
@@ -206,14 +206,15 @@ class MonitoringLogs(QWidget):
         self.room_search_button.setFixedHeight(36)
         self.room_search_button.setStyleSheet("""
                     QPushButton {
-                        background-color: #2980B9;
-                        color: white;
+                        background-color: #002366;
+                        color: #FFD700;
                         padding: 6px 14px;
                         border-radius: 6px;
                         font-weight: bold;
                     }
                     QPushButton:hover {
-                        background-color: #3498DB;
+                        background-color: #FFD700;
+                        color: black;
                     }
                     QPushButton:pressed {
                         background-color: #2471A3;

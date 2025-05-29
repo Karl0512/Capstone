@@ -167,12 +167,13 @@ class LiveRecognitionPage(QWidget):
 
     def remove_camera_widget(self, camera_widget):
         print(f"REMOVING camera_widget: {id(camera_widget)}")
-        self.save_camera_config()
+
         camera_widget.stop_camera()
         self.cameras_layout.removeWidget(camera_widget)
 
         if camera_widget in self.camera_widgets:
             self.camera_widgets.remove(camera_widget)
+            self.save_camera_config()
             print("Successfully removed from list.")
         else:
             print("WARNING: camera_widget not in camera_widgets list!")
@@ -395,7 +396,7 @@ class CameraFeedWidget(QWidget):
     def init_connections(self):
         self.timer.timeout.connect(self.update_frame)
         self.face_worker.detection_complete.connect(self.handle_detection_results)
-        self.close_button.clicked.connect(self.stop_camera)
+        self.close_button.clicked.connect(self.handle_close_camera)
 
     def iou(self, box1, box2):
         """Calculate Intersection over Union for two bounding boxes"""
@@ -537,15 +538,20 @@ class CameraFeedWidget(QWidget):
         ))
 
     def stop_camera(self):
-        if self.timer.isActive():
+        if self.timer and self.timer.isActive():
             self.timer.stop()
+
         if self.cap is not None:
             self.cap.release()
             self.cap = None
-        if self.face_thread.isRunning():
+
+        if self.face_thread and self.face_thread.isRunning():
             self.face_thread.quit()
             self.face_thread.wait()
-        self.deleteLater()
+
+    def handle_close_camera(self):
+        self.stop_camera()
+        self.finished.emit()
 
     def toggle_preview(self):
         if self.show_preview:
@@ -555,4 +561,3 @@ class CameraFeedWidget(QWidget):
         else:
             self.show_preview = True
             self.toggle_preview_button.setText("Turn Off Preview")
-
