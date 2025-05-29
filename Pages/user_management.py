@@ -2,8 +2,8 @@
 import os
 
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QPushButton, QComboBox, QSizePolicy, QTableWidget, QTableWidgetItem, QHeaderView, QDialog, QLineEdit, QStackedWidget, QMessageBox, QFrame
-from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QFont, QStandardItemModel, QStandardItem, QGuiApplication, QImage, QPixmap
+from PySide6.QtCore import Qt, QTimer, QRegularExpression
+from PySide6.QtGui import QFont, QStandardItemModel, QStandardItem, QGuiApplication, QImage, QPixmap, QRegularExpressionValidator
 import cv2
 import sys
 from Features.face_services import FaceDetectionService
@@ -218,6 +218,14 @@ class AddPersonWindow(QDialog):
 
         lbl_contact = QLabel("Contact:")
         self.ent_contact = QLineEdit()
+
+        # Regex for string that:
+        # - starts with 09
+        # - followed by exactly 9 digits
+        regex = QRegularExpression(r"09\d{9}")
+
+        validator = QRegularExpressionValidator(regex, self.ent_contact)
+        self.ent_contact.setValidator(validator)
 
         self.btn_save = QPushButton("Save")
         self.btn_save.clicked.connect(self.start_capture_sequence)
