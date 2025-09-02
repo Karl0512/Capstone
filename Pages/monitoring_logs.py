@@ -5,14 +5,19 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QDate, QTime
 from PySide6.QtGui import QFont
-from torchgen.api.types import layoutT
-
+from datetime import datetime
+import time
 from db.database import get_connection
 
 
+
 class MonitoringLogs(QWidget):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.last_logged_times = {}
+        self.room_last_logged_times = {}
+        self.purpose = "Entry"
+
 
         main_layout = QVBoxLayout(self)
 
@@ -21,40 +26,106 @@ class MonitoringLogs(QWidget):
         title.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title)
 
-        # Tab widget
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
 
-        # Tab 1: Entry/Exit
         self.entry_exit_tab = QWidget()
         self.setup_entry_exit_tab()
         self.tabs.addTab(self.entry_exit_tab, "Entry/Exit")
 
-        # Tab 2: Room Entry/Exit
         self.room_entry_exit_tab = QWidget()
         self.setup_room_entry_exit_tab()
         self.tabs.addTab(self.room_entry_exit_tab, "Room Entry/Exit")
+
+    def insert_monitoring_log(self, person_info):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        name = person_info.get("name")
+        role = person_info.get("role")
+        section = person_info.get("section")
+        purpose = self.purpose
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        try:
+            cursor.execute("""
+                INSERT INTO gate_logs (name, role, section, purpose, timestamp)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (name, role, section, purpose, timestamp))
+            conn.commit()
+        except Exception as e:
+            print("Error inserting log:", e)
+        finally:
+            cursor.close()
+            conn.close()
+
+            def insert_room_log(self, person_info, room):
+                conn = get_connection()
+                cursor = conn.cursor()
+
+                name = person_info.get("name")
+                role = person_info.get("role")
+                section = person_info.get("section")
+                purpose = self.purpose
+                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+                try:
+                    cursor.execute("""
+                        INSERT INTO room_logs (name, role, section, purpose, timestamp, room)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                    """, (name, role, section, purpose, timestamp, room))
+                    conn.commit()
+                except Exception as e:
+                    print("Error inserting room log:", e)
+                finally:
+                    cursor.close()
+                    conn.close()
+
+    def recognize_room_and_log(self, person_info, room):
+        recognize_name = person_info.get("name") if person_info else "Unknown"
+        if recognize_name and recognize_name.lower() != "unknown":
+            now = time.time()
+            cooldown_key = (recognize_name, room)
+            last_time = self.room_last_logged_times.get(cooldown_key, 0)
+            if now - last_time >= 30:
+                self.room_last_logged_times[cooldown_key] = now
+                self.insert_room_log(person_info, room)
+
+    def recognize_and_log(self, info):
+        recognize_name = info.get("name") if info else "Unknown"
+        if recognize_name and recognize_name.lower() != "unknown":
+            now = time.time()
+            last_time = self.last_logged_times.get(recognize_name, 0)
+            if now - last_time >= 30:
+                self.last_logged_times[recognize_name] = now
+                self.insert_monitoring_log(info)
 
     def setup_entry_exit_tab(self):
         layout = QVBoxLayout()
         self.entry_exit_tab.setLayout(layout)
 
         input_style = """
-                            QLineEdit, QDateEdit, QTimeEdit, QComboBox {
-                                padding: 6px;
-                                border: 1px solid #BDC3C7;
-                                border-radius: 6px;
-                                background-color: #F9F9F9;
-                            }
-                        """
+            QLineEdit, QDateEdit, QTimeEdit, QComboBox {
+                padding: 6px;
+                border: 1px solid #BDC3C7;
+                border-radius: 6px;
+                background-color: #F9F9F9;
+            }
+        """
 
-        # Filter layout
         top_filter_layout = QHBoxLayout()
         self.name_input = QLineEdit()
         self.name_input.setPlaceholderText("Search by name")
         self.name_input.setStyleSheet(input_style)
+
+        self.section_input = QLineEdit()
+        self.section_input.setPlaceholderText("Search by section")
+        self.section_input.setStyleSheet(input_style)
+
         top_filter_layout.addWidget(QLabel("Name:"))
         top_filter_layout.addWidget(self.name_input)
+        top_filter_layout.addWidget(QLabel("Section:"))
+        top_filter_layout.addWidget(self.section_input)
 
         self.toggle_button = QPushButton("\u25BC Show Filters")
         self.toggle_button.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
@@ -77,7 +148,6 @@ class MonitoringLogs(QWidget):
 
         layout.addLayout(top_filter_layout)
 
-        # Hidden advanced filters
         self.advanced_filters = QWidget()
         self.advanced_filters_layout = QHBoxLayout()
         self.advanced_filters.setLayout(self.advanced_filters_layout)
@@ -133,10 +203,9 @@ class MonitoringLogs(QWidget):
         self.advanced_filters.setVisible(False)
         layout.addWidget(self.advanced_filters)
 
-        # Entry/Exit table
         self.table = QTableWidget()
-        self.table.setColumnCount(4)
-        self.table.setHorizontalHeaderLabels(["Name", "Timestamp", "Role", "Action"])
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["Name", "Section", "Role", "Action", "Timestamp"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         layout.addWidget(self.table)
 
@@ -147,32 +216,22 @@ class MonitoringLogs(QWidget):
         self.room_entry_exit_tab.setLayout(layout)
 
         top_filter_layout = QHBoxLayout()
-        top_filter_layout.setSpacing(10)
-
         input_style = """
-                    QLineEdit, QDateEdit, QTimeEdit {
-                        padding: 6px;
-                        border: 1px solid #BDC3C7;
-                        border-radius: 6px;
-                        background-color: #F9F9F9;
-                    }
-                """
+            QLineEdit, QDateEdit, QTimeEdit {
+                padding: 6px;
+                border: 1px solid #BDC3C7;
+                border-radius: 6px;
+                background-color: #F9F9F9;
+            }
+        """
 
         self.room_name_input = QLineEdit()
         self.room_name_input.setPlaceholderText("Search by name")
         self.room_name_input.setStyleSheet(input_style)
 
-        name_label = QLabel("Name:")
-        top_filter_layout.addWidget(name_label)
-        top_filter_layout.addWidget(self.room_name_input)
-
         self.room_filter_input = QLineEdit()
         self.room_filter_input.setPlaceholderText("Search by room")
         self.room_filter_input.setStyleSheet(input_style)
-
-        room_label = QLabel("Room:")
-        top_filter_layout.addWidget(room_label)
-        top_filter_layout.addWidget(self.room_filter_input)
 
         self.room_start_date = QDateEdit()
         self.room_start_date.setCalendarPopup(True)
@@ -192,40 +251,40 @@ class MonitoringLogs(QWidget):
         self.room_end_time.setTime(QTime(23, 59))
         self.room_end_time.setStyleSheet(input_style)
 
-        from_label = QLabel("From:")
-        top_filter_layout.addWidget(from_label)
+        top_filter_layout.addWidget(QLabel("Name:"))
+        top_filter_layout.addWidget(self.room_name_input)
+        top_filter_layout.addWidget(QLabel("Room:"))
+        top_filter_layout.addWidget(self.room_filter_input)
+        top_filter_layout.addWidget(QLabel("From:"))
         top_filter_layout.addWidget(self.room_start_date)
         top_filter_layout.addWidget(self.room_start_time)
-
-        to_label = QLabel("To:")
-        top_filter_layout.addWidget(to_label)
+        top_filter_layout.addWidget(QLabel("To:"))
         top_filter_layout.addWidget(self.room_end_date)
         top_filter_layout.addWidget(self.room_end_time)
 
         self.room_search_button = QPushButton("Search")
         self.room_search_button.setFixedHeight(36)
         self.room_search_button.setStyleSheet("""
-                    QPushButton {
-                        background-color: #002366;
-                        color: #FFD700;
-                        padding: 6px 14px;
-                        border-radius: 6px;
-                        font-weight: bold;
-                    }
-                    QPushButton:hover {
-                        background-color: #FFD700;
-                        color: black;
-                    }
-                    QPushButton:pressed {
-                        background-color: #2471A3;
-                    }
-                """)
+            QPushButton {
+                background-color: #002366;
+                color: #FFD700;
+                padding: 6px 14px;
+                border-radius: 6px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #FFD700;
+                color: black;
+            }
+            QPushButton:pressed {
+                background-color: #2471A3;
+            }
+        """)
         self.room_search_button.clicked.connect(self.load_room_logs)
         top_filter_layout.addWidget(self.room_search_button)
 
         layout.addLayout(top_filter_layout)
 
-        # Table
         self.room_table = QTableWidget()
         self.room_table.setColumnCount(6)
         self.room_table.setHorizontalHeaderLabels(["Name", "Role", "Timestamp", "Purpose", "Section", "Room"])
@@ -242,6 +301,7 @@ class MonitoringLogs(QWidget):
     def load_logs(self):
         name_filter = self.name_input.text().strip()
         role_filter = self.role_combo.currentText()
+        section_filter = self.section_input.text().strip()
 
         start_dt = f"{self.start_date.date().toString('yyyy-MM-dd')} {self.start_time.time().toString('HH:mm:ss')}"
         end_dt = f"{self.end_date.date().toString('yyyy-MM-dd')} {self.end_time.time().toString('HH:mm:ss')}"
@@ -249,7 +309,7 @@ class MonitoringLogs(QWidget):
         conn = get_connection()
         cursor = conn.cursor()
 
-        query = "SELECT name, timestamp, role, purpose FROM gate_logs WHERE 1=1"
+        query = "SELECT name, timestamp, role, purpose, section FROM gate_logs WHERE 1=1"
         params = []
 
         if name_filter:
@@ -260,6 +320,10 @@ class MonitoringLogs(QWidget):
             query += " AND role = %s"
             params.append(role_filter)
 
+        if section_filter:
+            query += " AND section ILIKE %s"
+            params.append(f"%{section_filter}%")
+
         query += " AND timestamp BETWEEN %s AND %s"
         params.extend([start_dt, end_dt])
         query += " ORDER BY timestamp DESC"
@@ -268,11 +332,14 @@ class MonitoringLogs(QWidget):
         logs = cursor.fetchall()
 
         self.table.setRowCount(len(logs))
-        for row_idx, (name, timestamp, role, purpose) in enumerate(logs):
-            self.table.setItem(row_idx, 0, QTableWidgetItem(name))
-            self.table.setItem(row_idx, 1, QTableWidgetItem(str(timestamp)))
-            self.table.setItem(row_idx, 2, QTableWidgetItem(role))
-            self.table.setItem(row_idx, 3, QTableWidgetItem(purpose))
+        for row_idx, (name, timestamp, role, purpose, section) in enumerate(logs):
+            dt_obj = datetime.strptime(str(timestamp), "%Y-%m-%d %H:%M:%S")
+            formatted_timestamp = dt_obj.strftime("%Y-%m-%d %I:%M %p")
+
+            for col_idx, value in enumerate([name, section, role, purpose, formatted_timestamp]):
+                item = QTableWidgetItem(value)
+                item.setTextAlignment(Qt.AlignCenter)
+                self.table.setItem(row_idx, col_idx, item)
 
         conn.close()
 
@@ -286,7 +353,7 @@ class MonitoringLogs(QWidget):
         conn = get_connection()
         cursor = conn.cursor()
 
-        query = "SELECT name, role, timestamp, purpose, section, room FROM room_logs WHERE role='Students'"
+        query = "SELECT name, role, timestamp, purpose, section, room FROM room_logs WHERE 1=1"
         params = []
 
         if name_filter:
@@ -306,12 +373,12 @@ class MonitoringLogs(QWidget):
 
         self.room_table.setRowCount(len(logs))
         for row_idx, (name, role, timestamp, purpose, section, room) in enumerate(logs):
-            self.room_table.setItem(row_idx, 0, QTableWidgetItem(name))
-            self.room_table.setItem(row_idx, 1, QTableWidgetItem(role))
-            self.room_table.setItem(row_idx, 2, QTableWidgetItem(str(timestamp)))
-            self.room_table.setItem(row_idx, 3, QTableWidgetItem(purpose))
-            self.room_table.setItem(row_idx, 4, QTableWidgetItem(section))
-            self.room_table.setItem(row_idx, 5, QTableWidgetItem(room))
+            dt_obj = datetime.strptime(str(timestamp), "%Y-%m-%d %H:%M:%S")
+            formatted_timestamp = dt_obj.strftime("%Y-%m-%d %I:%M %p")
+
+            for col_idx, value in enumerate([name, role, formatted_timestamp, purpose, section, room]):
+                item = QTableWidgetItem(value)
+                item.setTextAlignment(Qt.AlignCenter)
+                self.room_table.setItem(row_idx, col_idx, item)
 
         conn.close()
-

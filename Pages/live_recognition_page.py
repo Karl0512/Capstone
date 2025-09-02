@@ -12,6 +12,8 @@ from Features.face_services import FaceDetectionService
 from functools import partial
 import json
 import os
+from Pages.monitoring_logs import MonitoringLogs
+
 
 CONFIG_PATH = "./camera_config.json"
 
@@ -19,6 +21,7 @@ class LiveRecognitionPage(QWidget):
     def __init__(self):
         super().__init__()
         self.camera_widgets = []
+        self.monitoring_logs = MonitoringLogs()  # Create instance for logging
         self.init_ui()
 
     def init_ui(self):
@@ -119,7 +122,8 @@ class LiveRecognitionPage(QWidget):
                 source_type=source_type,
                 label=label,
                 purpose=purpose, # <- Pass purpose
-                location=location
+                location=location,
+                monitoring_logs = self.monitoring_logs
             )
             print(f"ADDING camera_widget: {id(camera_widget)}")
             camera_widget.finished.connect(partial(self.remove_camera_widget, camera_widget))
@@ -136,6 +140,7 @@ class LiveRecognitionPage(QWidget):
                 "label": cam.label,
                 "purpose": cam.purpose,
                 "location": cam.location
+
             })
 
         with open(CONFIG_PATH, "w") as f:
@@ -154,8 +159,10 @@ class LiveRecognitionPage(QWidget):
                 source_type=cam["source_type"],
                 label=cam["label"],
                 purpose=cam["purpose"],
-                location=cam["location"]
+                location=cam["location"],
+                monitoring_logs=self.monitoring_logs
             )
+
             camera_widget.finished.connect(partial(self.remove_camera_widget, camera_widget))
             self.cameras_layout.addWidget(camera_widget)
             self.camera_widgets.append(camera_widget)
@@ -224,7 +231,7 @@ class AddCameraDialog(QDialog):
         layout.addWidget(self.purpose_selector)
 
         self.location_selector = QComboBox()
-        self.location_selector.addItems(["Gate", "Grade 1 Room", "Grade 2 Room", "Grade 3 Room", "Grade 4 Room", "Grade 5 Room", "Grade 6 Room", "Grade 7 Room", "Grade 8 Room", "Grade 9 Room", "Grade 10 Room"])
+        self.location_selector.addItems(["Gate", "Grade 1 Room", "Grade 2 Room", "Grade 3 Room", "Grade 4 Room", "Grade 5 Room", "Grade 6 Room", "Grade 7 Room", "Grade 8 Room", "Grade 9 Room", "Grade 10 Room","Grade 11 Room","Grade 12 Room"])
         layout.addWidget(QLabel("Location:"))
         layout.addWidget(self.location_selector)
 
@@ -288,13 +295,14 @@ class FaceDetectionWorker(QObject):
 class CameraFeedWidget(QWidget):
     finished = Signal()
 
-    def __init__(self, source, source_type='wired', label='Camera', purpose='Entry', location='Gate', parent=None):
+    def __init__(self, source, source_type='wired', label='Camera', purpose='Entry', location='Gate', monitoring_logs=None, parent=None):
         super().__init__(parent)
         self.label = label
         self.source = source
         self.source_type = source_type
         self.purpose = purpose
         self.location = location
+        self.monitoring_logs = monitoring_logs
         self.cap = None
         self.timer = QTimer(self)
         self.last_display_time = 0
@@ -462,13 +470,12 @@ class CameraFeedWidget(QWidget):
             QTimer.singleShot(0, lambda: self.face_worker.process_frame(rgb_frame.copy()))
 
     def handle_detection_results(self, frame, faces):
-        """Process face detection results from worker thread"""
-        # Update tracking with new detections
+        cooldown_seconds = 30  # 30-second interval
+
         for face in faces:
             box = (face.bbox / self.face_worker.scale).astype(int)
             x1, y1, x2, y2 = box
 
-            # Find best matching existing face
             best_match_id = None
             best_iou = 0
             for face_id, data in self.tracked_faces.items():
@@ -478,50 +485,81 @@ class CameraFeedWidget(QWidget):
                     best_match_id = face_id
 
             if best_match_id is not None:
-                # Update existing face
+                last_time = self.tracked_faces[best_match_id].get("last_recognized_time", 0)
+                elapsed = time.time() - last_time
+                if elapsed < cooldown_seconds:
+                    self.tracked_faces[best_match_id].update({
+                        "bbox": box,
+                        "last_seen": self.frame_counter,
+                        "kps": getattr(face, 'kps', None)
+                    })
+                    continue
+
                 self.tracked_faces[best_match_id].update({
                     "bbox": box,
                     "last_seen": self.frame_counter,
-                    "kps": getattr(face, 'kps', None)
+                    "kps": getattr(face, 'kps', None),
+                    "last_recognized_time": time.time()
                 })
                 if hasattr(face, 'normed_embedding'):
                     self.tracked_faces[best_match_id]["embedding"] = face.normed_embedding
+
             elif hasattr(face, 'normed_embedding'):
-                info = self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose, location=self.location)
+                info = self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose,
+                                                          location=self.location)
                 recognize_name = info.get("name") if info else "Unknown"
-                # Add new face
+
                 new_id = str(uuid.uuid4())
                 self.tracked_faces[new_id] = {
                     "bbox": box,
                     "embedding": face.normed_embedding,
                     "last_seen": self.frame_counter,
                     "kps": getattr(face, 'kps', None),
-                    "name": recognize_name or "Unknown"
+                    "name": recognize_name or "Unknown",
+                    "last_recognized_time": time.time()
                 }
 
-        # Remove expired faces
+                # Logging condition
+                if recognize_name.lower() != "unknown":
+                    if self.location.lower() == "gate":
+                        self.monitoring_logs.purpose = self.purpose
+                        self.monitoring_logs.recognize_and_log(info)
+                    else:
+                        self.monitoring_logs.purpose = self.purpose
+                        self.monitoring_logs.recognize_room_and_log(info, self.location)
+
+        # Clean expired faces
         current_frame = self.frame_counter
         expired = [fid for fid, data in self.tracked_faces.items()
-                  if current_frame - data["last_seen"] > self.face_ttl]
+                   if current_frame - data["last_seen"] > self.face_ttl]
         for face_id in expired:
             del self.tracked_faces[face_id]
 
     def draw_face_annotations(self, frame):
+        cooldown_seconds = 30
+
         for face_id, data in self.tracked_faces.items():
             x1, y1, x2, y2 = data["bbox"]
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
-
-            # Ensure name is a string, fallback to 'Unknown'
             name = data.get("name", "Unknown")
-            if not isinstance(name, str):
-                name = str(name)  # Convert to string just in case
 
+            # Set bounding box color
+            color = (0, 0, 255) if name.strip().lower() != "unknown" else (0, 255, 0)
+
+            # Draw bounding box
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+
+            # Draw name
             cv2.putText(frame, name, (x1, y1 - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            if "kps" in data and data["kps"] is not None:
-                for landmark in (data["kps"] / self.face_worker.scale):
-                    cv2.circle(frame, tuple(landmark.astype(int)), 2, (0, 0, 255), -1)
+            # Draw cooldown countdown in RED
+            last_time = data.get("last_recognized_time", 0)
+            elapsed = time.time() - last_time
+            if elapsed < cooldown_seconds:
+                remaining = int(cooldown_seconds - elapsed)
+                countdown_text = f"Cooldown: {remaining}s"
+                cv2.putText(frame, countdown_text, (x1, y2 + 20),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)  # RED (BGR)
 
         if self.show_preview:
             self.display_frame(frame)

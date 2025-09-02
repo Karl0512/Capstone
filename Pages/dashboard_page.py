@@ -16,7 +16,7 @@ class DashboardPage(QWidget):
         self.setLayout(main_layout)
 
         # Title
-        title = QLabel("Dashboard")
+        title = QLabel("Saviour School Inc.")
         title.setFont(QFont("Arial", 24))
         title.setAlignment(Qt.AlignCenter)
 
@@ -175,7 +175,21 @@ class DashboardPage(QWidget):
         table_widget.setRowCount(len(logs))
 
         for row_idx, (name, role, timestamp) in enumerate(logs):
-            table_widget.setItem(row_idx, 0, QTableWidgetItem(name))
-            table_widget.setItem(row_idx, 1, QTableWidgetItem(role))
-            table_widget.setItem(row_idx, 2, QTableWidgetItem(str(timestamp)))
+            # Name
+            name_item = QTableWidgetItem(name)
+            table_widget.setItem(row_idx, 0, name_item)
+
+            # Role (center aligned)
+            role_item = QTableWidgetItem(role)
+            role_item.setTextAlignment(Qt.AlignCenter)
+            table_widget.setItem(row_idx, 1, role_item)
+
+            # Timestamp formatted
+            if isinstance(timestamp, datetime.datetime):
+                formatted_time = timestamp.strftime("%Y-%m-%d %I:%M %p")
+            else:
+                formatted_time = str(timestamp)
+
+            timestamp_item = QTableWidgetItem(formatted_time)
+            table_widget.setItem(row_idx, 2, timestamp_item)
 
