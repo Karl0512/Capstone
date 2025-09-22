@@ -8,23 +8,41 @@ from PySide6.QtGui import QFont
 from datetime import datetime
 import time
 from db.database import get_connection
-
-
+from Features.csv_exporter import export_table_to_csv
 
 class MonitoringLogs(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.last_logged_times = {}
-        self.room_last_logged_times = {}
-        self.purpose = "Entry"
-
 
         main_layout = QVBoxLayout(self)
 
         title = QLabel("Monitoring Logs")
         title.setFont(QFont("Arial", 24))
-        title.setAlignment(Qt.AlignCenter)
-        main_layout.addWidget(title)
+
+        self.title_container = QWidget()
+        self.title_container_layout = QHBoxLayout(self.title_container)
+        self.title_container_layout.addWidget(title)
+
+
+        self.btn_export_csv = QPushButton("Export CSV")
+        self.btn_export_csv.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+        self.btn_export_csv.clicked.connect(self.handle_export_csv)
+        self.btn_export_csv.setStyleSheet("""
+                    QPushButton {
+                        background-color: #002366;
+                        color: #FFD700;
+                        font-weight: bold;
+                        border: none;
+                        border-radius: 6px;
+                        padding: 6px 12px;
+                    }
+                    QPushButton:hover {
+                        background-color: #FFD700;
+                        color: black;
+                    }
+                """)
+        self.title_container_layout.addWidget(self.btn_export_csv)
+        main_layout.addWidget(self.title_container)
 
         self.tabs = QTabWidget()
         main_layout.addWidget(self.tabs)
@@ -37,68 +55,13 @@ class MonitoringLogs(QWidget):
         self.setup_room_entry_exit_tab()
         self.tabs.addTab(self.room_entry_exit_tab, "Room Entry/Exit")
 
-    def insert_monitoring_log(self, person_info):
-        conn = get_connection()
-        cursor = conn.cursor()
+    def handle_export_csv(self):
+        current_index = self.tabs.currentIndex()
 
-        name = person_info.get("name")
-        role = person_info.get("role")
-        section = person_info.get("section")
-        purpose = self.purpose
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        try:
-            cursor.execute("""
-                INSERT INTO gate_logs (name, role, section, purpose, timestamp)
-                VALUES (%s, %s, %s, %s, %s)
-            """, (name, role, section, purpose, timestamp))
-            conn.commit()
-        except Exception as e:
-            print("Error inserting log:", e)
-        finally:
-            cursor.close()
-            conn.close()
-
-            def insert_room_log(self, person_info, room):
-                conn = get_connection()
-                cursor = conn.cursor()
-
-                name = person_info.get("name")
-                role = person_info.get("role")
-                section = person_info.get("section")
-                purpose = self.purpose
-                timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-                try:
-                    cursor.execute("""
-                        INSERT INTO room_logs (name, role, section, purpose, timestamp, room)
-                        VALUES (%s, %s, %s, %s, %s, %s)
-                    """, (name, role, section, purpose, timestamp, room))
-                    conn.commit()
-                except Exception as e:
-                    print("Error inserting room log:", e)
-                finally:
-                    cursor.close()
-                    conn.close()
-
-    def recognize_room_and_log(self, person_info, room):
-        recognize_name = person_info.get("name") if person_info else "Unknown"
-        if recognize_name and recognize_name.lower() != "unknown":
-            now = time.time()
-            cooldown_key = (recognize_name, room)
-            last_time = self.room_last_logged_times.get(cooldown_key, 0)
-            if now - last_time >= 30:
-                self.room_last_logged_times[cooldown_key] = now
-                self.insert_room_log(person_info, room)
-
-    def recognize_and_log(self, info):
-        recognize_name = info.get("name") if info else "Unknown"
-        if recognize_name and recognize_name.lower() != "unknown":
-            now = time.time()
-            last_time = self.last_logged_times.get(recognize_name, 0)
-            if now - last_time >= 30:
-                self.last_logged_times[recognize_name] = now
-                self.insert_monitoring_log(info)
+        if current_index == 0:  # Entry/Exit tab
+            export_table_to_csv(self.table, self, preset_name="Gate_logs")
+        elif current_index == 1:  # Room Entry/Exit tab
+            export_table_to_csv(self.room_table, self, preset_name="Room_Logs")
 
     def setup_entry_exit_tab(self):
         layout = QVBoxLayout()
@@ -326,7 +289,7 @@ class MonitoringLogs(QWidget):
 
         query += " AND timestamp BETWEEN %s AND %s"
         params.extend([start_dt, end_dt])
-        query += " ORDER BY timestamp DESC"
+        query += " ORDER BY timestamp DESC LIMIT 100"
 
         cursor.execute(query, params)
         logs = cursor.fetchall()

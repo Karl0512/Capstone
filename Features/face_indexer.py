@@ -21,39 +21,47 @@ class FaceIndexer:
         self.index = self.build_faiss_index(self.embeddings)
 
     def load_faces(self):
-        conn = get_connection()
-        cursor = conn.cursor()
-
         all_data = []
+        try:
+            conn = get_connection()
+            if not conn:
+                print("⚠️ No DB connection, skipping face loading.")
+                return all_data
 
-        # Unified people_info table
-        cursor.execute("SELECT id, name, contact, role, section_or_job, npy_path FROM person_info")
-        for row in cursor.fetchall():
-            id_, name, contact, role, section_or_job, npz_path = row
-            npz_files = glob.glob(npz_path) if '*' in npz_path else [npz_path]
+            cursor = conn.cursor()
 
-            for path in npz_files:
-                try:
-                    if path.endswith(".npz"):
-                        npz_data = np.load(path)
-                        if 'embeddings' in npz_data:
-                            emb_array = npz_data['embeddings']
-                            if emb_array.ndim == 2 and emb_array.shape[1] == 512:
-                                for emb in emb_array:
-                                    all_data.append({
-                                        "embedding": emb,
-                                        "info": {
-                                            "id": id_,
-                                            "name": name,
-                                            "contact": contact,
-                                            "role": role,
-                                            "section": section_or_job
-                                        }
-                                    })
-                except Exception as e:
-                    print(f"[people_info] Failed to load {path}: {e}")
+            # Unified people_info table
+            cursor.execute("SELECT id, name, contact, role, section_or_job, npy_path FROM person_info")
+            for row in cursor.fetchall():
+                id_, name, contact, role, section_or_job, npz_path = row
+                npz_files = glob.glob(npz_path) if '*' in npz_path else [npz_path]
 
-        conn.close()
+                for path in npz_files:
+                    try:
+                        if path.endswith(".npz"):
+                            npz_data = np.load(path)
+                            if 'embeddings' in npz_data:
+                                emb_array = npz_data['embeddings']
+                                if emb_array.ndim == 2 and emb_array.shape[1] == 512:
+                                    for emb in emb_array:
+                                        all_data.append({
+                                            "embedding": emb,
+                                            "info": {
+                                                "id": id_,
+                                                "name": name,
+                                                "contact": contact,
+                                                "role": role,
+                                                "section": section_or_job
+                                            }
+                                        })
+                    except Exception as e:
+                        print(f"[people_info] Failed to load {path}: {e}")
+
+            conn.close()
+
+        except Exception as e:
+            print(f"❌ Failed to load faces: {e}")
+
         return all_data
 
     def build_faiss_index(self, embeddings):

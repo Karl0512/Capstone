@@ -1,5 +1,5 @@
 # main.py
-from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QSizePolicy
+from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QSizePolicy, QDialog
 from PySide6.QtCore import QCoreApplication, QRect, Qt
 from PySide6.QtGui import QGuiApplication
 from sympy.polys.polyconfig import query
@@ -13,15 +13,17 @@ from Pages.live_recognition_page import LiveRecognitionPage  # Make sure the pat
 from Pages.user_management import UserManagementPage  # Make sure the path is correct
 from Pages.monitoring_logs import MonitoringLogs  # Make sure the path is correct
 from Pages.analytics_page import AnalyticsPage  # Make sure the path is correct
-from Pages.user_management import AddPersonWindow
+
+
+# from Pages.user_management import AddPersonWindow
 
 # features
-from Features.camera_manager import CameraManager
+# from Features.camera_manager import CameraManager
 
-import numpy as np
-import cv2
-from db.database import get_connection
-from Features.face_indexer import FaceIndexer
+# import numpy as np
+# import cv2
+# from db.database import get_connection
+# from Features.face_indexer import FaceIndexer
 
 
 class MainPage(QWidget):
@@ -39,7 +41,7 @@ class MainPage(QWidget):
         main_layout.setContentsMargins(0,0,0,0)
 
         # Sidebar (Menu)
-        sidebar = MenuWidget(main_window)
+        self.sidebar = MenuWidget(main_window)
 
         # Content area where the page will change
         self.content_area = QStackedWidget()
@@ -49,15 +51,18 @@ class MainPage(QWidget):
         content_layout.addWidget(self.content_area)
 
         # Set sidebar to stretch vertically to fit window height
-        sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # This makes the sidebar take up the full height
+        self.sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # This makes the sidebar take up the full height
 
         # Add sidebar and content to main layout
-        main_layout.addWidget(sidebar)
+        main_layout.addWidget(self.sidebar)
         main_layout.addLayout(content_layout)
 
         self.setLayout(main_layout)
 
     def set_content(self, page_name):
+        role = self.main_window.user_role
+        self.sidebar.show()
+
         if page_name == "dashboard":
             if not hasattr(self, 'dashboard_page'):
                 self.dashboard_page = DashboardPage()
@@ -93,7 +98,7 @@ class MainPage(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self, role):
         super().__init__()
 
         # Set the window size
@@ -106,13 +111,13 @@ class MainWindow(QMainWindow):
         # set window title
         self.setWindowTitle("Saviour Facial Recognition")
 
-        self.navigate_to("dashboard")
+        self.user_role = role
+
+        self.navigate_to("dashboard" if self.user_role == "admin" else "dashboard")
 
         # load the faces and info
         self.embeddings = None
         self.infos = []
-        # Initialize the FaceIndexer
-        face_indexer = FaceIndexer()
 
 
     def navigate_to(self, page):
@@ -123,6 +128,19 @@ class MainWindow(QMainWindow):
 
 if __name__ == "__main__":
     app = QApplication([])
-    window = MainWindow()
-    window.show()
-    app.exec()
+
+    from Pages.login_page import LoginDialog
+    from db.database import get_connection
+
+    conn = get_connection()
+    if not conn:
+        print("⚠️ Starting app without DB connection")
+
+    # Show login dialog
+    login = LoginDialog()
+    if login.exec() == QDialog.Accepted:
+        # Only create main window if login passed
+        window = MainWindow(login.user_role)
+        window.show()
+        app.exec()
+
