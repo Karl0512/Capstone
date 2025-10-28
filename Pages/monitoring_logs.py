@@ -1,12 +1,15 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem,
     QHeaderView, QLineEdit, QComboBox, QDateEdit, QTimeEdit,
-    QHBoxLayout, QPushButton, QSizePolicy, QTabWidget
+    QHBoxLayout, QPushButton, QSizePolicy, QTabWidget, QMessageBox
 )
 from PySide6.QtCore import Qt, QDate, QTime
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QFont, QColor, QBrush
 from datetime import datetime
 import time
+
+from sympy.physics.units import action
+
 from db.database import get_connection
 from Features.csv_exporter import export_table_to_csv
 
@@ -136,6 +139,10 @@ class MonitoringLogs(QWidget):
         self.end_time = QTimeEdit()
         self.end_time.setTime(QTime(23, 59))
         self.end_time.setStyleSheet(input_style)
+        self.limit_combo = QComboBox()
+        self.limit_combo.addItems(["10", "50", "100", "All"])
+        self.limit_combo.setCurrentText("10")  # default limit
+        self.limit_combo.setStyleSheet(input_style)
 
         self.advanced_filters_layout.addWidget(QLabel("Role:"))
         self.advanced_filters_layout.addWidget(self.role_combo)
@@ -145,6 +152,11 @@ class MonitoringLogs(QWidget):
         self.advanced_filters_layout.addWidget(QLabel("To:"))
         self.advanced_filters_layout.addWidget(self.end_date)
         self.advanced_filters_layout.addWidget(self.end_time)
+
+
+
+        self.advanced_filters_layout.addWidget(QLabel("Limit:"))
+        self.advanced_filters_layout.addWidget(self.limit_combo)
 
         self.search_button = QPushButton("Search")
         self.search_button.setStyleSheet("""
@@ -160,19 +172,20 @@ class MonitoringLogs(QWidget):
                 color: black;
             }
         """)
-        self.search_button.clicked.connect(self.load_logs)
+        self.search_button.clicked.connect(self.load_gate_logs)
         self.advanced_filters_layout.addWidget(self.search_button)
 
         self.advanced_filters.setVisible(False)
         layout.addWidget(self.advanced_filters)
 
         self.table = QTableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["Name", "Section", "Role", "Action", "Timestamp"])
+        self.table.setColumnCount(8)
+        self.table.setHorizontalHeaderLabels(["ID", "Name", "Section", "Role", "Action", "Timestamp", "Status", "Toggle"])
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.table.setColumnHidden(6, True)
         layout.addWidget(self.table)
 
-        self.load_logs()
+        self.load_gate_logs()
 
     def setup_room_entry_exit_tab(self):
         layout = QVBoxLayout()
@@ -180,7 +193,7 @@ class MonitoringLogs(QWidget):
 
         top_filter_layout = QHBoxLayout()
         input_style = """
-            QLineEdit, QDateEdit, QTimeEdit {
+            QLineEdit, QDateEdit, QTimeEdit, QComboBox {
                 padding: 6px;
                 border: 1px solid #BDC3C7;
                 border-radius: 6px;
@@ -214,6 +227,11 @@ class MonitoringLogs(QWidget):
         self.room_end_time.setTime(QTime(23, 59))
         self.room_end_time.setStyleSheet(input_style)
 
+        self.room_limit_combo = QComboBox()
+        self.room_limit_combo.addItems(["10", "50", "100", "All"])
+        self.room_limit_combo.setCurrentText("10")
+        self.room_limit_combo.setStyleSheet(input_style)
+
         top_filter_layout.addWidget(QLabel("Name:"))
         top_filter_layout.addWidget(self.room_name_input)
         top_filter_layout.addWidget(QLabel("Room:"))
@@ -224,6 +242,8 @@ class MonitoringLogs(QWidget):
         top_filter_layout.addWidget(QLabel("To:"))
         top_filter_layout.addWidget(self.room_end_date)
         top_filter_layout.addWidget(self.room_end_time)
+        top_filter_layout.addWidget(QLabel("Limit:"))
+        top_filter_layout.addWidget(self.room_limit_combo)
 
         self.room_search_button = QPushButton("Search")
         self.room_search_button.setFixedHeight(36)
@@ -249,9 +269,10 @@ class MonitoringLogs(QWidget):
         layout.addLayout(top_filter_layout)
 
         self.room_table = QTableWidget()
-        self.room_table.setColumnCount(6)
-        self.room_table.setHorizontalHeaderLabels(["Name", "Role", "Timestamp", "Purpose", "Section", "Room"])
+        self.room_table.setColumnCount(9)
+        self.room_table.setHorizontalHeaderLabels(["ID", "Name", "Role", "Timestamp", "Purpose", "Section", "Room", "Status", "Toggle"])
         self.room_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.room_table.setColumnHidden(7, True)
         layout.addWidget(self.room_table)
 
         self.load_room_logs()
@@ -261,10 +282,43 @@ class MonitoringLogs(QWidget):
         self.advanced_filters.setVisible(not visible)
         self.toggle_button.setText("▲ Hide Filters" if not visible else "▼ Show Filters")
 
-    def load_logs(self):
+    def toggle_status(self, log_id, table_name):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute(f"SELECT status FROM {table_name} WHERE id = %s", (log_id,))
+        current_status = cursor.fetchone()[0]
+
+        new_status = "void" if current_status == "active" else "active"
+        action_text = "void this record" if new_status == "void" else "activate this record"
+
+        reply = QMessageBox.question(
+            self,
+            "Confirm Action",
+            f"Are you sure you want to {action_text}?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+
+        if reply == QMessageBox.Yes:
+            cursor.execute(f"UPDATE {table_name} SET status = %s WHERE id = %s", (new_status, log_id))
+            conn.commit()
+
+        conn.close()
+        if table_name == "gate_logs":
+            self.load_gate_logs()
+        else:
+            self.load_room_logs()
+
+    def load_gate_logs(self):
+        gate_logs = self.fetch_gate_logs_from_db()
+        self.populate_gate_logs_table(gate_logs)
+
+    def fetch_gate_logs_from_db(self):
         name_filter = self.name_input.text().strip()
         role_filter = self.role_combo.currentText()
         section_filter = self.section_input.text().strip()
+        limit_value = self.limit_combo.currentText()
 
         start_dt = f"{self.start_date.date().toString('yyyy-MM-dd')} {self.start_time.time().toString('HH:mm:ss')}"
         end_dt = f"{self.end_date.date().toString('yyyy-MM-dd')} {self.end_time.time().toString('HH:mm:ss')}"
@@ -272,7 +326,7 @@ class MonitoringLogs(QWidget):
         conn = get_connection()
         cursor = conn.cursor()
 
-        query = "SELECT name, timestamp, role, purpose, section FROM gate_logs WHERE 1=1"
+        query = "SELECT id, name, timestamp, role, purpose, section, status FROM gate_logs WHERE 1=1"
         params = []
 
         if name_filter:
@@ -289,26 +343,101 @@ class MonitoringLogs(QWidget):
 
         query += " AND timestamp BETWEEN %s AND %s"
         params.extend([start_dt, end_dt])
-        query += " ORDER BY timestamp DESC LIMIT 100"
+        query += " ORDER BY timestamp DESC"
+
+        if limit_value != "All":
+            query += " LIMIT %s"
+            params.append(int(limit_value))
 
         cursor.execute(query, params)
-        logs = cursor.fetchall()
+        gate_logs = cursor.fetchall()
+        conn.close()
 
-        self.table.setRowCount(len(logs))
-        for row_idx, (name, timestamp, role, purpose, section) in enumerate(logs):
+        return gate_logs
+
+    def populate_gate_logs_table(self, gate_logs):
+        self.table.setRowCount(len(gate_logs))
+
+        for row_idx, (id, name, timestamp, role, purpose, section, status) in enumerate(gate_logs):
             dt_obj = datetime.strptime(str(timestamp), "%Y-%m-%d %H:%M:%S")
             formatted_timestamp = dt_obj.strftime("%Y-%m-%d %I:%M %p")
 
-            for col_idx, value in enumerate([name, section, role, purpose, formatted_timestamp]):
-                item = QTableWidgetItem(value)
+            row_values = [id, name, section, role, purpose, formatted_timestamp]
+            for col_idx, value in enumerate(row_values):
+                item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignCenter)
+
+                if status == "void":
+                    font = item.font()
+                    font.setStrikeOut(True)
+                    item.setFont(font)
+
+                    item.setBackground(QBrush(QColor(200, 200, 200, 80)))
+                    item.setForeground(QBrush(QColor(50, 50, 50, 120)))
+
                 self.table.setItem(row_idx, col_idx, item)
 
-        conn.close()
+            status_item = QTableWidgetItem(status)
+            self.table.setItem(row_idx, 6, status_item)
+
+            # Add the action button
+            btn = self.create_status_button(id, status, "gate_logs")
+            self.table.setCellWidget(row_idx, 7, btn)
+
+    def create_status_button(self, log_id, status, table_name):
+        btn = QPushButton("Void" if status == "active" else "Activate")
+        btn.setFixedSize(80, 28)
+
+        if status == "active":
+            btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #28a745;
+                            color: white;
+                            font-weight: bold;
+                            border: none;
+                            border-radius: 6px;
+                            padding: 4px 8px;
+                        }
+                        QPushButton:hover {
+                            background-color: #218838;
+                        }
+                    """)
+        else:
+            btn.setStyleSheet("""
+                        QPushButton {
+                            background-color: #dc3545;
+                            color: white;
+                            font-weight: bold;
+                            border: none;
+                            border-radius: 6px;
+                            padding: 4px 8px;
+                        }
+                        QPushButton:hover {
+                            background-color: #c82333;
+                        }
+                    """)
+
+
+        btn.clicked.connect(lambda _, log_id=log_id: self.toggle_status(log_id, table_name))
+
+        # 👇 wrap button in QWidget with centered layout
+        wrapper = QWidget()
+        layout = QHBoxLayout(wrapper)
+        layout.addWidget(btn)
+        layout.setAlignment(Qt.AlignCenter)  # center it
+        layout.setContentsMargins(0, 0, 0, 0)  # no padding
+        wrapper.setLayout(layout)
+
+        return wrapper
 
     def load_room_logs(self):
+        room_logs = self.fetch_room_logs_from_db()
+        self.populate_room_logs_table(room_logs)
+
+    def fetch_room_logs_from_db(self):
         name_filter = self.room_name_input.text().strip()
         room_filter = self.room_filter_input.text().strip()
+        limit_value = self.room_limit_combo.currentText()
 
         start_dt = f"{self.room_start_date.date().toString('yyyy-MM-dd')} {self.room_start_time.time().toString('HH:mm:ss')}"
         end_dt = f"{self.room_end_date.date().toString('yyyy-MM-dd')} {self.room_end_time.time().toString('HH:mm:ss')}"
@@ -316,7 +445,7 @@ class MonitoringLogs(QWidget):
         conn = get_connection()
         cursor = conn.cursor()
 
-        query = "SELECT name, role, timestamp, purpose, section, room FROM room_logs WHERE 1=1"
+        query = "SELECT id, name, role, timestamp, purpose, section, room, status FROM room_logs WHERE 1=1"
         params = []
 
         if name_filter:
@@ -331,17 +460,39 @@ class MonitoringLogs(QWidget):
         params.extend([start_dt, end_dt])
         query += " ORDER BY timestamp DESC"
 
-        cursor.execute(query, params)
-        logs = cursor.fetchall()
+        if limit_value != "All":
+            query += " LIMIT %s"
+            params.append(int(limit_value))
 
-        self.room_table.setRowCount(len(logs))
-        for row_idx, (name, role, timestamp, purpose, section, room) in enumerate(logs):
+        cursor.execute(query, params)
+        room_logs = cursor.fetchall()
+        conn.close()
+
+        return room_logs
+
+    def populate_room_logs_table(self, room_logs):
+        self.room_table.setRowCount(len(room_logs))
+        for row_idx, (id, name, role, timestamp, purpose, section, room, status) in enumerate(room_logs):
             dt_obj = datetime.strptime(str(timestamp), "%Y-%m-%d %H:%M:%S")
             formatted_timestamp = dt_obj.strftime("%Y-%m-%d %I:%M %p")
 
-            for col_idx, value in enumerate([name, role, formatted_timestamp, purpose, section, room]):
-                item = QTableWidgetItem(value)
+            row_values = [id, name, role, formatted_timestamp, purpose, section, room]
+            for col_idx, value in enumerate(row_values):
+                item = QTableWidgetItem(str(value))
                 item.setTextAlignment(Qt.AlignCenter)
+
+                if status == "void":
+                    font = item.font()
+                    font.setStrikeOut(True)
+                    item.setFont(font)
+
+                    item.setBackground(QBrush(QColor(200, 200, 200, 80)))
+                    item.setForeground(QBrush(QColor(50, 50, 50, 120)))
+
                 self.room_table.setItem(row_idx, col_idx, item)
 
-        conn.close()
+            status_item = QTableWidgetItem(status)
+            self.room_table.setItem(row_idx, 7, status_item)
+
+            btn = self.create_status_button(id, status, "room_logs")
+            self.room_table.setCellWidget(row_idx, 8, btn)

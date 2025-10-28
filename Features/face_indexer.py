@@ -147,21 +147,45 @@ class FaceIndexer:
                 cursor.close()
                 conn.close()
 
-                return recognized_info
+                return {
+                    "info": recognized_info,
+                    "timestamp": timestamp,
+                }
             else:
                 try:
-                    cursor.execute("""INSERT INTO room_logs (name, timestamp, role, purpose, section, room)
-                                                            VALUES (%s, %s, %s, %s, %s, %s)""", (name, timestamp, role, camera_purpose, section, location))
-                    conn.commit()
-                    print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
+                    cursor.execute("SELECT timestamp FROM room_logs WHERE name = %s ORDER BY timestamp DESC LIMIT 1", (name,))
+                    row = cursor.fetchone()
+
+                    if row:
+                        last_timestamp = row[0]
+                        elapsed_seconds = (datetime.now() - last_timestamp).total_seconds()
+
+                        if elapsed_seconds >= 30:
+                            cursor.execute("""INSERT INTO room_logs (name, timestamp, role, purpose, section, room)
+                                            VALUES (%s, %s, %s, %s, %s, %s)""", (name, timestamp, role, camera_purpose, section, location))
+                            conn.commit()
+                            print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
+                        else:
+                            print(f"❌ Cooldown active. Please wait {30 - elapsed_seconds:.1f} more seconds.")
+                    else:
+                        cursor.execute("""INSERT INTO room_logs (name, timestamp, role, purpose, section, room)
+                                                  VALUES (%s, %s, %s, %s, %s, %s)""",
+                                      (name, timestamp, role, camera_purpose, section, location))
+                        conn.commit()
+                        print(f"📝 First entry log added for {name} on {current_date} with role {role}.")
 
                 except Exception as e:
                     print(f"Error: {e}")
 
-                cursor.close()
-                conn.close()
+                finally:
+                    cursor.close()
+                    conn.close()
 
-                return recognized_info
+                return {
+                    "info": recognized_info,
+                    "timestamp": timestamp,
+                    "elapsed_seconds": elapsed_seconds if row else None
+                }
 
         else:
             print("❌ No match found or the match is not strict enough")

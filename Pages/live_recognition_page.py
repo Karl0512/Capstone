@@ -7,6 +7,9 @@ import numpy as np
 import insightface
 import uuid
 import time
+
+from win32ctypes.pywin32.pywintypes import datetime
+
 from Features.face_indexer import FaceIndexer
 from Features.face_services import FaceDetectionService
 from functools import partial
@@ -470,12 +473,13 @@ class CameraFeedWidget(QWidget):
             QTimer.singleShot(0, lambda: self.face_worker.process_frame(rgb_frame.copy()))
 
     def handle_detection_results(self, frame, faces):
-        cooldown_seconds = 30  # 30-second interval
-
+        """Process face detection results from worker thread"""
+        # Update tracking with new detections
         for face in faces:
             box = (face.bbox / self.face_worker.scale).astype(int)
             x1, y1, x2, y2 = box
 
+            # Find best matching existing face
             best_match_id = None
             best_iou = 0
             for face_id, data in self.tracked_faces.items():
@@ -485,30 +489,59 @@ class CameraFeedWidget(QWidget):
                     best_match_id = face_id
 
             if best_match_id is not None:
-                last_time = self.tracked_faces[best_match_id].get("last_recognized_time", 0)
-                elapsed = time.time() - last_time
-                if elapsed < cooldown_seconds:
-                    self.tracked_faces[best_match_id].update({
-                        "bbox": box,
-                        "last_seen": self.frame_counter,
-                        "kps": getattr(face, 'kps', None)
-                    })
-                    continue
-
+                # Update existing face
                 self.tracked_faces[best_match_id].update({
                     "bbox": box,
                     "last_seen": self.frame_counter,
-                    "kps": getattr(face, 'kps', None),
-                    "last_recognized_time": time.time()
+                    "kps": getattr(face, 'kps', None)
                 })
                 if hasattr(face, 'normed_embedding'):
                     self.tracked_faces[best_match_id]["embedding"] = face.normed_embedding
 
-            elif hasattr(face, 'normed_embedding'):
-                info = self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose,
-                                                          location=self.location)
-                recognize_name = info.get("name") if info else "Unknown"
+                cooldown_seconds = 30
+                last_time_str = self.tracked_faces[best_match_id].get("last_recognized_time", 0)
 
+                try:
+                    last_time = datetime.strptime(last_time_str, "%Y-%m-%d %H:%M:%S").timestamp()
+                except Exception:
+                    # fallback if last_recognized_time is already a float
+                    last_time = float(last_time_str) if last_time_str else 0
+
+                elapsed = time.time() - last_time
+
+                if elapsed >= cooldown_seconds:
+                    # Time to re-recognize
+                    result = self.face_recognize.recognize_face(
+                        face.normed_embedding,
+                        camera_purpose=self.purpose,
+                        location=self.location
+                    )
+
+                    if result:
+                        recognize_name = result["info"].get("name", "Unknown")
+                        self.tracked_faces[best_match_id]["name"] = recognize_name
+                        self.tracked_faces[best_match_id]["last_recognized_time"] = time.time()  # reset cooldown
+                        self.tracked_faces[best_match_id]["cooldown_start"] = time.time()
+                        self.tracked_faces[best_match_id]["cooldown_seconds"] = 30
+
+            elif hasattr(face, 'normed_embedding'):
+                result = self.face_recognize.recognize_face(face.normed_embedding, camera_purpose=self.purpose, location=self.location)
+                if result:
+                    recognize_name = result["info"].get("name", "Unknown")
+                    elapsed_seconds = result.get("elapsed_seconds", 0)  # for cooldown display
+                    timestamp_str = result.get("timestamp", 0)
+                    timestamp = datetime.strptime(timestamp_str, "%Y-%m-%d %H:%M:%S").timestamp()
+                else:
+                    recognize_name = "Unknown"
+                    elapsed_seconds = 0
+                    timestamp = 0
+
+                if elapsed_seconds > 30:
+                    remaining_cooldown = 30
+
+                else:
+                    remaining_cooldown = max(30 - elapsed_seconds, 0)
+                # Add new face
                 new_id = str(uuid.uuid4())
                 self.tracked_faces[new_id] = {
                     "bbox": box,
@@ -516,27 +549,23 @@ class CameraFeedWidget(QWidget):
                     "last_seen": self.frame_counter,
                     "kps": getattr(face, 'kps', None),
                     "name": recognize_name or "Unknown",
-                    "last_recognized_time": time.time()
+                    "elapsed_seconds": elapsed_seconds,
+                    "cooldown_start": time.time(),
+                    "cooldown_seconds": remaining_cooldown,
+                    "last_recognized_time": timestamp
                 }
 
-                # Logging condition
-                if recognize_name.lower() != "unknown":
-                    if self.location.lower() == "gate":
-                        self.monitoring_logs.purpose = self.purpose
-                        self.monitoring_logs.recognize_and_log(info)
-                    else:
-                        self.monitoring_logs.purpose = self.purpose
-                        self.monitoring_logs.recognize_room_and_log(info, self.location)
-
-        # Clean expired faces
+        # Remove expired faces
         current_frame = self.frame_counter
         expired = [fid for fid, data in self.tracked_faces.items()
-                   if current_frame - data["last_seen"] > self.face_ttl]
+                  if current_frame - data["last_seen"] > self.face_ttl]
         for face_id in expired:
             del self.tracked_faces[face_id]
 
     def draw_face_annotations(self, frame):
         cooldown_seconds = 30
+
+        h, w, _ = frame.shape  # Frame height and width
 
         for face_id, data in self.tracked_faces.items():
             x1, y1, x2, y2 = data["bbox"]
@@ -548,18 +577,22 @@ class CameraFeedWidget(QWidget):
             # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
 
-            # Draw name
-            cv2.putText(frame, name, (x1, y1 - 10),
+            # Draw name above the box, clamped to frame
+            name_y = max(y1 - 10, 15)
+            cv2.putText(frame, name, (x1, name_y),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-            # Draw cooldown countdown in RED
-            last_time = data.get("last_recognized_time", 0)
-            elapsed = time.time() - last_time
-            if elapsed < cooldown_seconds:
-                remaining = int(cooldown_seconds - elapsed)
+            # Draw cooldown countdown in RED below the box, clamped to frame
+            cooldown_seconds = data.get("cooldown_seconds", 30)
+            start_time = data.get("cooldown_start", time.time())
+            elapsed = time.time() - start_time
+            remaining = max(int(cooldown_seconds - elapsed), 0)
+
+            if remaining > 0:
                 countdown_text = f"Cooldown: {remaining}s"
-                cv2.putText(frame, countdown_text, (x1, y2 + 20),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)  # RED (BGR)
+                text_y = min(y2 + 25, h - 5)
+                cv2.putText(frame, countdown_text, (x1, text_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         if self.show_preview:
             self.display_frame(frame)
