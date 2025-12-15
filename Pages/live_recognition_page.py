@@ -572,7 +572,7 @@ class CameraFeedWidget(QWidget):
             name = data.get("name", "Unknown")
 
             # Set bounding box color
-            color = (0, 0, 255) if name.strip().lower() != "unknown" else (0, 255, 0)
+            color = (0, 255, 0) if name.strip().lower() != "unknown" else (255, 0, 0)
 
             # Draw bounding box
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
@@ -592,7 +592,7 @@ class CameraFeedWidget(QWidget):
                 countdown_text = f"Cooldown: {remaining}s"
                 text_y = min(y2 + 25, h - 5)
                 cv2.putText(frame, countdown_text, (x1, text_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
 
         if self.show_preview:
             self.display_frame(frame)

@@ -94,6 +94,7 @@ class LoginDialog(QDialog):
 
                 if bcrypt.checkpw(pwd.encode("utf-8"), store_hash.encode("utf-8")):
                     self.user_role = role
+                    self.username_text = user
                     self.accept()
                     return
 

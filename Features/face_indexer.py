@@ -135,9 +135,9 @@ class FaceIndexer:
                 if count == 0:
                     # Insert new log
                     cursor.execute("""
-                                    INSERT INTO gate_logs (name, timestamp, role, purpose, section)
-                                    VALUES (%s, %s, %s, %s, %s)
-                                """, (name, timestamp, role, camera_purpose, section))
+                                    INSERT INTO gate_logs (person_id, name, timestamp, role, purpose, section)
+                                    VALUES (%s, %s, %s, %s, %s, %s)
+                                """, (recognized_info['id'], name, timestamp, role, camera_purpose, section))
                     conn.commit()
                     send_sms_notification(contact, name, timestamp, camera_purpose)
                     print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
@@ -161,8 +161,8 @@ class FaceIndexer:
                         elapsed_seconds = (datetime.now() - last_timestamp).total_seconds()
 
                         if elapsed_seconds >= 30:
-                            cursor.execute("""INSERT INTO room_logs (name, timestamp, role, purpose, section, room)
-                                            VALUES (%s, %s, %s, %s, %s, %s)""", (name, timestamp, role, camera_purpose, section, location))
+                            cursor.execute("""INSERT INTO room_logs (person_id, name, timestamp, role, purpose, section, room)
+                                            VALUES (%s, %s, %s, %s, %s, %s, %s)""", (recognized_info['id'], name, timestamp, role, camera_purpose, section, location))
                             conn.commit()
                             print(f"📝 Entry log added for {name} on {current_date} with role {role}.")
                         else:
