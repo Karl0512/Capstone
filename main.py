@@ -1,7 +1,8 @@
 # main.py
 from PySide6.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QStackedWidget, QSizePolicy, QDialog
 from PySide6.QtCore import QCoreApplication, QRect, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
+from faiss.contrib.datasets import username
 from sympy.polys.polyconfig import query
 
 # component import
@@ -13,6 +14,7 @@ from Pages.live_recognition_page import LiveRecognitionPage  # Make sure the pat
 from Pages.user_management import UserManagementPage  # Make sure the path is correct
 from Pages.monitoring_logs import MonitoringLogs  # Make sure the path is correct
 from Pages.analytics_page import AnalyticsPage  # Make sure the path is correct
+from Pages.report_page import ReportPage  # Make sure the path is correct
 
 
 # from Pages.user_management import AddPersonWindow
@@ -93,6 +95,12 @@ class MainPage(QWidget):
                 self.content_area.addWidget(self.analytics_page)
             self.content_area.setCurrentWidget(self.analytics_page)
 
+        elif page_name == "report":
+            if not hasattr(self, 'report_page'):
+                self.report_page = ReportPage(username=self.main_window.username)
+                self.content_area.addWidget(self.report_page)
+            self.content_area.setCurrentWidget(self.report_page)
+
         else:
             print(f"Unknown page: {page_name}")
 
@@ -103,6 +111,9 @@ class MainWindow(QMainWindow):
 
         # Set the window size
         self.resize(1200, 800)
+
+        # set window icon
+        self.setWindowIcon(QIcon("assests/images/Saviour_logo.png"))
 
         # Get the screen geometry and center the window
         screen_geometry = QGuiApplication.primaryScreen().geometry()
@@ -118,6 +129,8 @@ class MainWindow(QMainWindow):
         # load the faces and info
         self.embeddings = None
         self.infos = []
+
+        self.username = user_info['username']
 
 
     def navigate_to(self, page):
@@ -140,6 +153,9 @@ if __name__ == "__main__":
     login = LoginDialog()
     if login.exec() == QDialog.Accepted:
         # Only create main window if login passed
+        user_info = {
+            "username": login.username_text
+        }
         window = MainWindow(login.user_role)
         window.show()
         app.exec()
